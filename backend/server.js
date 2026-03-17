@@ -1,18 +1,20 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 
 const config = require('./lib/config');
 const { loadSkills } = require('./lib/skill-loader');
 const { routeChatMessage } = require('./lib/chat');
-const { runMarketIntelligence } = require('./lib/skills/market-intelligence');
-const { runEdaVisualAnalysis } = require('./lib/skills/eda-visual-analysis');
-const { runTradeRecommendation } = require('./lib/skills/trade-recommendation');
+const { runMarketIntelligence } = require('../skills/market-intelligence/scripts');
+const { runEdaVisualAnalysis } = require('../skills/eda-visual-analysis/scripts');
+const { runTradeRecommendation } = require('../skills/trade-recommendation/scripts');
 
 const app = express();
 const skills = loadSkills();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'frontend')));
 
 function handleRouteError(res, error, fallbackStatus = 500) {
   const status = /required|must be/.test(error.message) ? 400 : fallbackStatus;
@@ -67,6 +69,10 @@ app.get('/api/health', (req, res) => {
     skills: Object.keys(skills),
     transports: ['http', 'mcp-stdio'],
   });
+});
+
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'frontend', 'index.html'));
 });
 
 app.listen(config.port, () => {

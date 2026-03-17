@@ -5,28 +5,65 @@ An agent-skills–based stock analysis chatbot powered by **DeepSeek AI** with t
 ## Architecture
 
 ```
-quant-demo/
-├── .env                          # API keys (DeepSeek, etc.)
-├── skills/                       # Agent Skills (agentskills.io spec)
+QA101/
+├── README.md
+├── skills/                       # Agent skill definitions (agentskills.io spec)
 │   ├── market-intelligence/
-│   │   ├── SKILL.md              # Skill definition & instructions
+│   │   ├── SKILL.md              # Skill definition and routing guidance
+│   │   ├── scripts/
+│   │   │   └── index.js          # Executable skill logic
+│   │   ├── assets/               # Optional templates/resources
 │   │   └── references/data-sources.md
 │   ├── eda-visual-analysis/
 │   │   ├── SKILL.md
+│   │   ├── scripts/
+│   │   │   └── index.js
+│   │   ├── assets/
 │   │   └── references/chart-types.md
 │   └── trade-recommendation/
 │       ├── SKILL.md
+│       ├── scripts/
+│       │   └── index.js
+│       ├── assets/
 │       └── references/risk-factors.md
 ├── backend/
 │   ├── package.json
-│   ├── server.js                 # Express API adapter
-│   ├── mcp-server.js             # MCP stdio server adapter
-│   └── lib/                      # Reusable skill modules and helpers
+│   ├── server.js                 # Express HTTP API
+│   ├── mcp-server.js             # MCP stdio server
+│   └── lib/
+│       ├── chat.js               # Chat orchestration
+│       ├── config.js             # Env/config loader
+│       ├── llm.js                # DeepSeek client wrapper
+│       ├── pipeline.js           # End-to-end analysis pipeline
+│       ├── skill-loader.js       # Loads SKILL.md definitions
+│       └── utils.js              # Shared helpers
 └── frontend/
-    └── index.html                # Chat UI + charts (Chart.js)
+    └── index.html                # Single-page chat UI + chart rendering
 ```
 
+Runtime architecture:
+- Frontend (`frontend/index.html`) calls the HTTP API on `backend/server.js`.
+- Chat orchestration in `backend/lib/chat.js` and `backend/lib/pipeline.js` routes requests across skills.
+- Skill instructions are loaded from `skills/*/SKILL.md`, while executable logic runs from `skills/*/scripts/index.js`.
+- `backend/mcp-server.js` exposes the same capabilities as MCP tools, reusing the backend skill modules.
+
 ## Setup
+
+### Quick start (from repo root)
+Terminal 1:
+```bash
+cd backend
+npm install
+node server.js
+```
+
+Terminal 2:
+```bash
+cd backend
+npm run mcp
+```
+
+Then open: http://localhost:3001/
 
 ### 1. Configure API keys
 Edit `.env`:
@@ -44,12 +81,18 @@ cd backend
 npm install
 ```
 
-### 3. Start the backend
+### 3. Start the app server (HTTP API + frontend)
+From `backend/`:
 ```bash
 node server.js
 ```
 
-### 4. Start the MCP server
+This starts the API and serves the frontend at:
+- http://localhost:3001/
+- Health check: http://localhost:3001/api/health
+
+### 4. Start the MCP server (separate terminal)
+Open a second terminal, go to `backend/`, then run:
 ```bash
 npm run mcp
 ```
@@ -57,10 +100,14 @@ npm run mcp
 This starts a local stdio MCP server that exposes the QuantBot skills as MCP tools for compatible AI clients.
 
 ### 5. Open the frontend
-Open `frontend/index.html` in your browser.
-(Or serve it: `npx serve frontend`)
+Open http://localhost:3001/ in your browser.
 
 ## How It Works
+
+### Running modes
+- Browser app mode: requires `node server.js`
+- MCP client mode: requires `npm run mcp`
+- Full local demo (recommended): run both commands in parallel using two terminals
 
 ### Agent Skills Pattern
 Each skill follows the [agentskills.io spec](https://agentskills.io/specification):
@@ -70,7 +117,7 @@ Each skill follows the [agentskills.io spec](https://agentskills.io/specificatio
 
 The LLM (DeepSeek) receives each `SKILL.md` as part of its system prompt — this is how it "learns" what each skill does and how to execute it.
 
-The executable skill logic lives in reusable backend modules under `backend/lib/skills/`. Both the Express API and the MCP server call the same modules, so the skills are reusable across different applications and transports.
+The executable skill logic lives directly in each skill folder under `scripts/`. Both the Express API and the MCP server import those script modules, so the skills remain reusable across transports while matching the agent skill folder pattern.
 
 ### Skill 1: market-intelligence
 - Validates ticker symbol
@@ -96,7 +143,7 @@ The executable skill logic lives in reusable backend modules under `backend/lib/
 ## Customization
 
 ### Adding real market data
-Replace the `generateMockMarketData()` function in `backend/lib/skills/market-intelligence.js`:
+Replace the `generateMockMarketData()` function in `skills/market-intelligence/scripts/index.js`:
 - **Alpha Vantage** (free): https://www.alphavantage.co/documentation/
 - **Yahoo Finance** (unofficial): `npm install yahoo-finance2`
 - **Polygon.io**: https://polygon.io/
