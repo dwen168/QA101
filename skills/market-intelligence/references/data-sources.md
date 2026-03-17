@@ -1,7 +1,7 @@
 # Market Data Sources — Reference
 
 ## Currently Used: Mock Generator
-`generateMockMarketData(ticker)` in `backend/server.js` simulates realistic price data for demo purposes. Replace with a live provider for production use.
+`generateMockMarketData(ticker)` in `skills/market-intelligence/scripts/index.js` simulates realistic price data for demo purposes. Replace with a live provider for production use.
 
 ---
 

@@ -399,7 +399,7 @@ async function runSkillPipeline(ticker) {
   setPillState(1, 'active');
   const l1 = addLoadingMsg('⟳ Running market-intelligence skill...');
 
-  let marketData, llmAnalysis;
+  let marketData, llmAnalysis, dataSource, usedFallback, fallbackReason;
   try {
     const r1 = await fetch(`${API_BASE}/skills/market-intelligence`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -408,10 +408,13 @@ async function runSkillPipeline(ticker) {
     const d1 = await r1.json();
     marketData = d1.marketData;
     llmAnalysis = d1.llmAnalysis;
+    dataSource = d1.dataSource || d1.marketData.dataSource || 'unknown';
+    usedFallback = d1.usedFallback || false;
+    fallbackReason = d1.fallbackReason;
     setPillState(1, 'done');
     removeLoadingMsg();
     addMessage('bot', `✓ Market intelligence collected for <strong>${ticker}</strong>`, { cls: 's1', label: '① market-intelligence' });
-    renderMarketIntelligence(marketData, llmAnalysis, panel);
+    renderMarketIntelligence(marketData, llmAnalysis, panel, dataSource, usedFallback, fallbackReason);
   } catch (err) {
     setPillState(1, '');
     removeLoadingMsg();
@@ -467,7 +470,7 @@ async function runSkillPipeline(ticker) {
 // ─────────────────────────────────────────
 // RENDER: Market Intelligence
 // ─────────────────────────────────────────
-function renderMarketIntelligence(d, llm, panel) {
+function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFallback = false, fallbackReason = null) {
   const changeClass = d.changePercent >= 0 ? 'up' : 'down';
   const changeSign = d.changePercent >= 0 ? '+' : '';
 
@@ -476,6 +479,33 @@ function renderMarketIntelligence(d, llm, panel) {
   const sentPct = ((d.sentimentScore + 1) / 2 * 100).toFixed(0);
 
   const fmtNum = (n) => n?.toLocaleString('en-US', { maximumFractionDigits: 2 }) ?? '—';
+
+  // Data source banner
+  if (usedFallback) {
+    const banner = document.createElement('div');
+    banner.className = 'fade-in';
+    banner.style.cssText = 'background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px';
+    banner.innerHTML = `
+      <span style="font-size:16px">⚠️</span>
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:500;color:var(--amber)">Using Mock Data</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">${fallbackReason || 'Live API unavailable, using demo data'}</div>
+      </div>
+    `;
+    panel.appendChild(banner);
+  } else if (dataSource === 'alpha-vantage') {
+    const banner = document.createElement('div');
+    banner.className = 'fade-in';
+    banner.style.cssText = 'background:rgba(16,232,152,0.1);border:1px solid rgba(16,232,152,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px';
+    banner.innerHTML = `
+      <span style="font-size:16px">✓</span>
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:500;color:var(--green)">Live Market Data</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">Real-time data from Alpha Vantage</div>
+      </div>
+    `;
+    panel.appendChild(banner);
+  }
 
   // Divider
   const div0 = document.createElement('div');
