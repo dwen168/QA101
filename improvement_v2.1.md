@@ -4,6 +4,7 @@
 - V2.0 focused on international live market-data coverage, ticker routing, and data-source transparency.
 - V2.1 builds on that by improving usability, auditability, and standards compliance:
   - portfolio optimization can now be triggered directly from the UI chatbot
+  - backtesting can now be triggered directly from the UI chatbot and rendered in the main analysis panel
   - news cards now expose article summaries and direct source links, not just headlines
   - news summaries are collapsible, keeping the interface compact
   - MACD signal-line calculation now follows the standard EMA-based method instead of approximation
@@ -17,9 +18,13 @@
   - Corrected MACD signal-line calculation to use the standard EMA-based method.
 - Improved `portfolio-optimization`:
   - Enabled portfolio requests through the UI chatbot.
+- Improved `backtesting`:
+  - Enabled chatbot-triggered backtests and frontend report rendering.
+  - Improved engine warmup behavior and reporting fidelity.
 - Improved `frontend` experience:
   - Added collapsible news summaries.
   - Added portfolio result rendering inside the analysis panel.
+  - Added backtest result rendering with summary, metrics, equity curve, and recent trades.
 
 ## 1) Portfolio Optimization Is Now Accessible from Chat UI
 - Users can now trigger the `portfolio-optimization` skill directly from the chatbot.
@@ -75,6 +80,7 @@
 - News sentiment remains lightweight and fast, but is now paired with richer supporting context.
 - Users can inspect not just what the model inferred, but what article/source caused that inference.
 - Portfolio requests are no longer backend-only; they now work end-to-end from natural-language chat to rendered portfolio output.
+- Backtest requests are also no longer backend-only; they now work from natural-language chat to visual performance output in the UI.
 
 ## 6) Documentation Improvements
 - Training documentation for signal calibration was consolidated into a single canonical guide:
@@ -87,6 +93,7 @@
 ## 7) Version Summary
 - V2.1 focuses on making QuantBot more production-usable and more auditable:
   - portfolio optimization can now be requested directly from the chatbot
+  - backtesting can now be requested directly from the chatbot
   - news intelligence is richer and easier to verify
   - technical indicators are more standard and reliable
   - training workflow documentation is clearer for future model calibration

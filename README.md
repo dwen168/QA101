@@ -1,10 +1,11 @@
 # QuantBot — AI Quantitative Analysis Demo
 
-An agent-skills–based stock analysis chatbot powered by **DeepSeek AI** with four specialized skills: single-stock analysis and multi-stock portfolio optimization.
+An agent-skills–based stock analysis chatbot powered by **DeepSeek AI** with five specialized skills: single-stock analysis, multi-stock portfolio optimization, and historical strategy backtesting.
 
 ## What's New in v2.1
 
 - Portfolio optimization can now be triggered directly from the UI chatbot with natural-language prompts such as `Optimize portfolio AAPL, MSFT, NVDA`.
+- Backtesting can now be triggered directly from the UI chatbot with prompts such as `Backtest AAPL from 2025-01-01 to 2026-03-18`.
 - News cards now show richer article context with summaries and source links instead of headline-only display.
 - News summaries are collapsible, so the analysis panel stays compact while keeping source detail available on demand.
 - MACD signal-line calculation now uses the standard EMA-based MACD(12,26,9) method.

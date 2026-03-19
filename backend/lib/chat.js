@@ -2,12 +2,34 @@ const axios = require('axios');
 const config = require('./config');
 
 async function routeChatMessage({ message, history = [] }) {
+  const parseDateRange = (raw) => {
+    const text = String(raw || '');
+    const matches = text.match(/\b\d{4}-\d{2}-\d{2}\b/g) || [];
+    if (matches.length >= 2) {
+      return { startDate: matches[0], endDate: matches[1] };
+    }
+
+    const end = new Date();
+    const start = new Date(end);
+    start.setFullYear(start.getFullYear() - 1);
+    const fmt = (d) => d.toISOString().split('T')[0];
+    return { startDate: fmt(start), endDate: fmt(end) };
+  };
+
+  const parseBacktestStrategy = (raw) => {
+    const lower = String(raw || '').toLowerCase();
+    if (/macd.?bb/.test(lower)) return 'macd-bb';
+    if (/rsi.?ma/.test(lower)) return 'rsi-ma';
+    return 'trade-recommendation';
+  };
+
   const systemPrompt = `You are QuantBot, an AI-powered quantitative analysis assistant. You help users analyze stocks using specialized Agent Skills:
 
 1. **market-intelligence** — Collects price trends, news, consensus, and sentiment
 2. **eda-visual-analysis** — Performs visual exploratory data analysis
 3. **trade-recommendation** — Generates BUY/HOLD/SELL recommendations
 4. **portfolio-optimization** — Optimizes allocation and ranking across multiple stocks
+5. **backtesting** — Replays a strategy on historical data and evaluates performance metrics
 
 When a user mentions a stock ticker or asks to analyze a stock, you MUST:
 1. Acknowledge you'll run the analysis
@@ -16,16 +38,20 @@ When a user mentions a stock ticker or asks to analyze a stock, you MUST:
 ALWAYS respond with a JSON object in this format:
 {
   "message": "Your conversational response here",
-  "action": null OR "ANALYZE_STOCK" OR "OPTIMIZE_PORTFOLIO",
+  "action": null OR "ANALYZE_STOCK" OR "OPTIMIZE_PORTFOLIO" OR "RUN_BACKTEST",
   "ticker": null OR "TICKER_SYMBOL",
   "tickers": null OR ["TICKER1", "TICKER2", "..."],
   "timeHorizon": null OR "SHORT" OR "MEDIUM" OR "LONG",
+  "startDate": null OR "YYYY-MM-DD",
+  "endDate": null OR "YYYY-MM-DD",
+  "strategyName": null OR "trade-recommendation" OR "macd-bb" OR "rsi-ma",
   "skillSequence": null OR ["market-intelligence", "eda-visual-analysis", "trade-recommendation"]
 }
 
 For non-stock questions, set action to null and just respond conversationally.
 For stock analysis requests, extract the ticker and set action to "ANALYZE_STOCK".
 For portfolio optimization requests with multiple tickers, set action to "OPTIMIZE_PORTFOLIO" and provide tickers array.
+For backtest requests, set action to "RUN_BACKTEST" and include ticker, startDate, endDate, and strategyName.
 
 Common tickers: AAPL (Apple), TSLA (Tesla), NVDA (Nvidia), MSFT (Microsoft), AMZN (Amazon), GOOGL (Google), META (Meta).
 
@@ -89,7 +115,8 @@ Be concise, professional, and enthusiastic about quantitative analysis.`;
     const msg = String(message || '').toUpperCase().trim();
     const tickers = extractTickers(msg);
 
-    const portfolioIntent = /portfolio|optimi[sz]e|allocat|weight|rebalance|diversif|basket|multi.?stock/.test(msg.toLowerCase());
+    const lowerMsg = msg.toLowerCase();
+    const portfolioIntent = /portfolio|optimi[sz]e|allocat|weight|rebalance|diversif|basket|multi.?stock|组合|调仓|配置|优化/.test(lowerMsg);
     if (portfolioIntent) {
       if (tickers.length >= 2) {
         return {
@@ -98,6 +125,9 @@ Be concise, professional, and enthusiastic about quantitative analysis.`;
           ticker: null,
           tickers,
           timeHorizon: parseTimeHorizon(msg),
+          startDate: null,
+          endDate: null,
+          strategyName: null,
           skillSequence: ['portfolio-optimization'],
         };
       }
@@ -108,6 +138,40 @@ Be concise, professional, and enthusiastic about quantitative analysis.`;
         ticker: null,
         tickers: null,
         timeHorizon: null,
+        startDate: null,
+        endDate: null,
+        strategyName: null,
+        skillSequence: null,
+      };
+    }
+
+    const backtestIntent = /backtest|back.?testing|回测|复盘|strategy test|historical test/.test(lowerMsg);
+    if (backtestIntent) {
+      if (tickers.length >= 1) {
+        const { startDate, endDate } = parseDateRange(msg);
+        const strategyName = parseBacktestStrategy(msg);
+        return {
+          message: `I will backtest ${tickers[0]} using ${strategyName} from ${startDate} to ${endDate}.`,
+          action: 'RUN_BACKTEST',
+          ticker: tickers[0],
+          tickers: null,
+          timeHorizon: null,
+          startDate,
+          endDate,
+          strategyName,
+          skillSequence: ['backtesting'],
+        };
+      }
+
+      return {
+        message: 'I can run a backtest. Please provide a ticker, for example: "Backtest AAPL from 2025-01-01 to 2026-03-18".',
+        action: null,
+        ticker: null,
+        tickers: null,
+        timeHorizon: null,
+        startDate: null,
+        endDate: null,
+        strategyName: null,
         skillSequence: null,
       };
     }
@@ -127,16 +191,22 @@ Be concise, professional, and enthusiastic about quantitative analysis.`;
         ticker: ticker,
         tickers: null,
         timeHorizon: null,
+        startDate: null,
+        endDate: null,
+        strategyName: null,
         skillSequence: ['market-intelligence', 'eda-visual-analysis', 'trade-recommendation'],
       };
     }
 
     return {
-      message: 'I\'m QuantBot! Ask me to analyze a stock ("Analyze AAPL") or optimize a portfolio ("Optimize portfolio AAPL, MSFT, NVDA").',
+      message: 'I\'m QuantBot! Ask me to analyze a stock, optimize a portfolio, or backtest a strategy. Examples: "Analyze AAPL", "Optimize portfolio AAPL, MSFT, NVDA", "Backtest AAPL from 2025-01-01 to 2026-03-18".',
       action: null,
       ticker: null,
       tickers: null,
       timeHorizon: null,
+      startDate: null,
+      endDate: null,
+      strategyName: null,
     };
   }
 }

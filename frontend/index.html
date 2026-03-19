@@ -84,6 +84,7 @@
   .skill-badge.s1 { background: rgba(0,212,255,0.1); color: var(--cyan); border: 1px solid rgba(0,212,255,0.2); }
   .skill-badge.s2 { background: rgba(16,232,152,0.1); color: var(--green); border: 1px solid rgba(16,232,152,0.2); }
   .skill-badge.s3 { background: rgba(245,166,35,0.1); color: var(--amber); border: 1px solid rgba(245,166,35,0.2); }
+  .skill-badge.s4 { background: rgba(0,212,255,0.08); color: var(--cyan); border: 1px solid rgba(0,212,255,0.18); }
 
   .chat-input-area { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg); }
   .chat-input-row { display: flex; gap: 8px; }
@@ -277,6 +278,7 @@
       <span class="skill-pill" id="pill-1">① market-intelligence</span>
       <span class="skill-pill" id="pill-2">② eda-visual-analysis</span>
       <span class="skill-pill" id="pill-3">③ trade-recommendation</span>
+      <span class="skill-pill" id="pill-4">④ backtesting</span>
     </div>
   </div>
 </header>
@@ -289,11 +291,13 @@
       <div class="msg bot fade-in">
         <div class="msg-bubble">
           👋 Hi! I'm <strong>QuantBot</strong>, your AI quantitative analyst.<br><br>
-          I use <strong>3 Agent Skills</strong> to analyze any stock:<br>
+          I use <strong>5 skills</strong> for stock, portfolio, and backtest analysis:<br>
           • <strong style="color:var(--cyan)">Market Intelligence</strong> — trends, news, sentiment<br>
           • <strong style="color:var(--green)">EDA Visual Analysis</strong> — charts & statistics<br>
-          • <strong style="color:var(--amber)">Trade Recommendation</strong> — buy/hold/sell<br><br>
-          Try: <em>"Analyze NVDA"</em> or <em>"Should I buy AAPL?"</em>
+          • <strong style="color:var(--amber)">Trade Recommendation</strong> — buy/hold/sell<br>
+          • <strong style="color:var(--cyan)">Portfolio Optimization</strong> — ranking, allocation, diversification<br>
+          • <strong style="color:var(--green)">Backtesting</strong> — historical strategy validation<br><br>
+          Try: <em>"Analyze NVDA"</em>, <em>"Optimize portfolio AAPL, MSFT, NVDA"</em>, or <em>"Backtest AAPL from 2025-01-01 to 2026-03-18"</em>
         </div>
         <span class="msg-time">QuantBot</span>
       </div>
@@ -306,9 +310,11 @@
         <button class="quick-btn" onclick="quickAnalyze('MSFT')">MSFT</button>
         <button class="quick-btn" onclick="quickAnalyze('META')">META</button>
         <button class="quick-btn" onclick="quickAnalyze('AMZN')">AMZN</button>
+        <button class="quick-btn" onclick="quickPortfolio(['AAPL','MSFT','NVDA'])">Portfolio Demo</button>
+        <button class="quick-btn" onclick="quickBacktest('AAPL')">Backtest Demo</button>
       </div>
       <div class="chat-input-row">
-        <textarea class="chat-input" id="chat-input" rows="2" placeholder="Ask me to analyze a stock..."></textarea>
+        <textarea class="chat-input" id="chat-input" rows="2" placeholder="Analyze a stock, optimize a portfolio, or run a backtest..."></textarea>
         <button class="send-btn" onclick="sendMessage()">
           <svg viewBox="0 0 16 16"><path d="M1 8L15 1 8 15 7 9z"/></svg>
         </button>
@@ -320,7 +326,7 @@
   <div class="analysis-panel" id="analysis-panel">
     <div class="welcome-state" id="welcome-state">
       <div class="w-icon">📊</div>
-      <p>Ask QuantBot to analyze a stock to see<br>charts, insights, and trade recommendations.</p>
+      <p>Ask QuantBot to analyze a stock, optimize a portfolio, or run a backtest to see<br>charts, insights, trade recommendations, and historical performance.</p>
     </div>
   </div>
 
@@ -369,7 +375,7 @@ function setPillState(n, state) {
   pill.className = `skill-pill ${state}`;
 }
 function resetPills() {
-  [1,2,3].forEach(n => setPillState(n, ''));
+  [1,2,3,4].forEach(n => setPillState(n, ''));
 }
 
 async function sendMessage() {
@@ -384,6 +390,20 @@ async function sendMessage() {
 
 async function quickAnalyze(ticker) {
   const text = `Analyze ${ticker}`;
+  addMessage('user', text);
+  chatHistory.push({ role: 'user', content: text });
+  await processMessage(text);
+}
+
+async function quickPortfolio(tickers) {
+  const text = `Optimize portfolio ${tickers.join(', ')}`;
+  addMessage('user', text);
+  chatHistory.push({ role: 'user', content: text });
+  await processMessage(text);
+}
+
+async function quickBacktest(ticker) {
+  const text = `Backtest ${ticker} from 2025-01-01 to 2026-03-18`;
   addMessage('user', text);
   chatHistory.push({ role: 'user', content: text });
   await processMessage(text);
@@ -406,6 +426,10 @@ async function processMessage(text) {
       addMessage('bot', data.message || `Running analysis on <strong>${data.ticker}</strong>...`);
       chatHistory.push({ role: 'assistant', content: data.message });
       await runSkillPipeline(data.ticker);
+    } else if (data.action === 'RUN_BACKTEST' && data.ticker) {
+      addMessage('bot', data.message || `Running backtest on <strong>${data.ticker}</strong>...`);
+      chatHistory.push({ role: 'assistant', content: data.message || 'Running backtest...' });
+      await runBacktestPipeline(data.ticker, data.startDate, data.endDate, data.strategyName || 'trade-recommendation');
     } else if (data.action === 'OPTIMIZE_PORTFOLIO') {
       const tickers = Array.isArray(data.tickers) ? data.tickers : [];
       if (tickers.length >= 2) {
@@ -544,6 +568,39 @@ async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
   }
 }
 
+async function runBacktestPipeline(ticker, startDate, endDate, strategyName = 'trade-recommendation') {
+  const panel = document.getElementById('analysis-panel');
+  panel.innerHTML = '';
+  destroyCharts();
+  resetPills();
+
+  setPillState(4, 'active');
+  const loading = addLoadingMsg('⟳ Running backtesting skill...');
+  try {
+    const r = await fetch(`${API_BASE}/skills/backtesting`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticker, startDate, endDate, strategyName, initialCapital: 100000 }),
+    });
+    const d = await r.json();
+    removeLoadingMsg();
+
+    if (!r.ok || d.error) {
+      setPillState(4, '');
+      addMessage('bot', d.error || 'Backtesting failed.');
+      return;
+    }
+
+    setPillState(4, 'done');
+    addMessage('bot', `✓ Backtest complete for <strong>${ticker}</strong>`, { cls: 's2', label: '④ backtesting' });
+    renderBacktestReport(d.backtestReport, panel);
+  } catch (err) {
+    setPillState(4, '');
+    removeLoadingMsg();
+    addMessage('bot', 'Could not run backtest. Make sure backend is running and API keys are configured.');
+  }
+}
+
 function renderPortfolioOptimization(result, panel) {
   const metrics = result.portfolioMetrics || {};
   const ranked = result.rankedTickers || [];
@@ -613,6 +670,153 @@ function renderPortfolioOptimization(result, panel) {
       ${narrative.recommendations && narrative.recommendations.length ? `<div style="margin-top:10px">${narrative.recommendations.map(r => `<div class="insight-item"><div class="insight-dot"></div><span>${r}</span></div>`).join('')}</div>` : ''}
     `;
     panel.appendChild(narrativeCard);
+  }
+
+  panel.scrollTop = 0;
+}
+
+function renderBacktestReport(report, panel) {
+  const metrics = report.performanceMetrics || {};
+  const cap = report.capital || {};
+  const signalDist = report.signalDistribution || {};
+  const recommendations = report.recommendations || [];
+  const equity = report.equityCurve || [];
+  const trades = report.tradeLog || [];
+  const drawdown = report.drawdownAnalysis || {};
+  const risk = report.riskAnalysis || {};
+
+  const section = document.createElement('div');
+  section.className = 'section-divider fade-in';
+  section.innerHTML = `<div class="section-divider-line"></div><span class="section-divider-text">④ backtesting</span><div class="section-divider-line"></div>`;
+  panel.appendChild(section);
+
+  const summary = document.createElement('div');
+  summary.className = 'card fade-in';
+  summary.innerHTML = `
+    <div class="card-header">
+      <span class="card-title">Backtest Summary</span>
+      <span style="font-size:11px;font-family:var(--mono);padding:2px 7px;border-radius:4px;background:rgba(0,212,255,0.08);color:var(--cyan);border:1px solid rgba(0,212,255,0.2)">${report.strategyName}</span>
+    </div>
+    <div class="ticker-stats" style="grid-template-columns:repeat(4,1fr)">
+      <div class="stat-item"><span class="stat-label">TOTAL RETURN</span><span class="stat-value">${(cap.totalReturn ?? 0).toFixed(2)}%</span></div>
+      <div class="stat-item"><span class="stat-label">FINAL CAPITAL</span><span class="stat-value">$${(cap.final ?? 0).toLocaleString('en-US', { maximumFractionDigits: 2 })}</span></div>
+      <div class="stat-item"><span class="stat-label">SHARPE</span><span class="stat-value">${(metrics.sharpeRatio ?? 0).toFixed(2)}</span></div>
+      <div class="stat-item"><span class="stat-label">MAX DD</span><span class="stat-value">${(metrics.maxDrawdown ?? 0).toFixed(1)}%</span></div>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--text2)">${report.ticker} · ${report.period.startDate} to ${report.period.endDate} · ${report.period.tradingDays} trading days</div>
+  `;
+  panel.appendChild(summary);
+
+  const metricsCard = document.createElement('div');
+  metricsCard.className = 'card fade-in';
+  metricsCard.innerHTML = `
+    <div class="card-header"><span class="card-title">Performance Metrics</span></div>
+    <div class="ticker-stats" style="grid-template-columns:repeat(4,1fr)">
+      <div class="stat-item"><span class="stat-label">TRADES</span><span class="stat-value">${metrics.totalTrades ?? 0}</span></div>
+      <div class="stat-item"><span class="stat-label">WIN RATE</span><span class="stat-value">${(metrics.winRate ?? 0).toFixed(1)}%</span></div>
+      <div class="stat-item"><span class="stat-label">PROFIT FACTOR</span><span class="stat-value">${(metrics.profitFactor ?? 0).toFixed(2)}</span></div>
+      <div class="stat-item"><span class="stat-label">CAGR</span><span class="stat-value">${(metrics.cagr ?? 0).toFixed(1)}%</span></div>
+    </div>
+    <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+      <span class="detail-chip">Buy signals: ${signalDist.buySignals ?? 0}</span>
+      <span class="detail-chip">Sell signals: ${signalDist.sellSignals ?? 0}</span>
+      <span class="detail-chip">Hold days: ${signalDist.holdDays ?? 0}</span>
+      <span class="detail-chip">Avg trade: ${(metrics.avgTradeReturn ?? 0).toFixed(2)}%</span>
+    </div>
+  `;
+  panel.appendChild(metricsCard);
+
+  const riskCard = document.createElement('div');
+  riskCard.className = 'card fade-in';
+  riskCard.innerHTML = `
+    <div class="card-header"><span class="card-title">Drawdown & Risk</span></div>
+    <div class="ticker-stats" style="grid-template-columns:repeat(4,1fr)">
+      <div class="stat-item"><span class="stat-label">MAX DD</span><span class="stat-value">${(drawdown.maxDrawdownPercent ?? 0).toFixed(1)}%</span></div>
+      <div class="stat-item"><span class="stat-label">RECOVERY DAYS</span><span class="stat-value">${drawdown.recoveryDays ?? '—'}</span></div>
+      <div class="stat-item"><span class="stat-label">MAX LOSS TRADE</span><span class="stat-value">${(risk.maxSingleTradeLoss ?? 0).toFixed(2)}%</span></div>
+      <div class="stat-item"><span class="stat-label">MAX LOSS STREAK</span><span class="stat-value">${risk.maxConsecutiveLosses ?? 0}</span></div>
+    </div>
+    <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px">
+      <span class="detail-chip">Avg win: ${(risk.avgWinSize ?? 0).toFixed(2)}%</span>
+      <span class="detail-chip">Avg loss: ${(risk.avgLossSize ?? 0).toFixed(2)}%</span>
+      <span class="detail-chip">P/L ratio: ${risk.profitToLossRatio ?? '—'}</span>
+      <span class="detail-chip">Drawdown periods: ${(drawdown.drawdownPeriods || []).length}</span>
+    </div>
+    ${(drawdown.drawdownPeriods || []).length ? `
+      <div style="margin-top:12px">
+        <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Major Drawdown Periods</div>
+        ${(drawdown.drawdownPeriods || []).slice(0, 3).map(period => `
+          <div class="risk-flag" style="margin-bottom:6px">
+            Peak ${String(period.startDate).slice(0,10)} -> Bottom ${String(period.bottomDate).slice(0,10)} · ${period.maxLoss}% ${period.recoveryDate ? `· Recovered ${String(period.recoveryDate).slice(0,10)}` : '· Not yet recovered'}
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+  `;
+  panel.appendChild(riskCard);
+
+  const chartCard = document.createElement('div');
+  chartCard.className = 'chart-full fade-in';
+  chartCard.innerHTML = `<div class="chart-title">Equity Curve</div><div class="chart-canvas-wrap" style="height:260px"><canvas id="chart-backtest-equity"></canvas></div>`;
+  panel.appendChild(chartCard);
+  setTimeout(() => {
+    const ctx = document.getElementById('chart-backtest-equity')?.getContext('2d');
+    if (!ctx) return;
+    currentCharts['backtest-equity'] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: equity.map(p => String(p.date).slice(0, 10)),
+        datasets: [{
+          label: 'Capital',
+          data: equity.map(p => p.capital),
+          borderColor: '#00d4ff',
+          backgroundColor: 'rgba(0,212,255,0.08)',
+          fill: true,
+          tension: 0.2,
+          pointRadius: 0,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: '#7a8fb8', font: { size: 11, family: "'DM Mono', monospace" } } } },
+        scales: {
+          x: { ticks: { color: '#3d5080', maxTicksLimit: 8 }, grid: { color: 'rgba(0,212,255,0.04)' }, border: { color: 'rgba(0,212,255,0.1)' } },
+          y: { ticks: { color: '#3d5080' }, grid: { color: 'rgba(0,212,255,0.04)' }, border: { color: 'rgba(0,212,255,0.1)' } },
+        },
+      },
+    });
+  }, 50);
+
+  if (recommendations.length) {
+    const recoCard = document.createElement('div');
+    recoCard.className = 'card fade-in';
+    recoCard.innerHTML = `
+      <div class="card-header"><span class="card-title">Backtest Interpretation</span></div>
+      <div class="insight-list">${recommendations.map(r => `<div class="insight-item"><div class="insight-dot"></div><span>${r}</span></div>`).join('')}</div>
+    `;
+    panel.appendChild(recoCard);
+  }
+
+  if (trades.length) {
+    const tradesCard = document.createElement('div');
+    tradesCard.className = 'card fade-in';
+    tradesCard.innerHTML = `
+      <div class="card-header"><span class="card-title">Recent Trades</span></div>
+      <div style="display:grid;grid-template-columns:70px 110px 90px 90px 100px;gap:8px;font-size:10px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border)">
+        <span>ID</span><span>Entry</span><span>Exit</span><span>PnL %</span><span>Reason</span>
+      </div>
+      ${trades.slice(0, 12).map(t => `
+        <div style="display:grid;grid-template-columns:70px 110px 90px 90px 100px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--mono)">
+          <span>#${t.tradeId}</span>
+          <span>${String(t.entryDate).slice(0,10)} @ $${t.entryPrice}</span>
+          <span>${String(t.exitDate).slice(0,10)}</span>
+          <span style="color:${t.pnlPercent >= 0 ? 'var(--green)' : 'var(--red)'}">${t.pnlPercent >= 0 ? '+' : ''}${t.pnlPercent}%</span>
+          <span style="color:var(--text2)">${t.reason}</span>
+        </div>
+      `).join('')}
+    `;
+    panel.appendChild(tradesCard);
   }
 
   panel.scrollTop = 0;
