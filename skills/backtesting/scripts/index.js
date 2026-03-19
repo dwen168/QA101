@@ -85,11 +85,16 @@ async function fetchHistoricalDataFromYahoo(ticker) {
     const to = new Date();
     const from = new Date(Date.now() - 3650 * 24 * 3600 * 1000);
 
-    const history = await yf.historical(ticker, {
+    const chart = await yf.chart(ticker, {
       period1: from.toISOString().split('T')[0],
       period2: to.toISOString().split('T')[0],
       interval: '1d',
+      events: '',
+    }, {
+      validateResult: false,
     });
+
+    const history = chart?.quotes || [];
 
     if (!history || history.length < 5) return null;
 

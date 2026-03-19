@@ -404,18 +404,23 @@ async function fetchYahooFinanceData(ticker) {
   const to = new Date();
   const from = new Date(Date.now() - 120 * 24 * 3600 * 1000);
 
-  const [history, summary] = await Promise.all([
-    yf.historical(ticker, {
+  const [chart, summary] = await Promise.all([
+    yf.chart(ticker, {
       period1: from.toISOString().split('T')[0],
       period2: to.toISOString().split('T')[0],
       interval: '1d',
+      events: '',
+    }, {
+      validateResult: false,
     }),
     yf.quoteSummary(ticker, {
       modules: ['price', 'summaryProfile', 'financialData', 'defaultKeyStatistics', 'recommendationTrend'],
     }),
   ]);
 
-  if (!history || history.length < 5) {
+  const validHistory = (chart?.quotes || []).filter((bar) => bar && bar.date && safeNumber(bar.close) > 0);
+
+  if (!validHistory || validHistory.length < 5) {
     throw new Error(`Yahoo Finance returned insufficient history for ${ticker}`);
   }
 
@@ -425,7 +430,7 @@ async function fetchYahooFinanceData(ticker) {
   const sp = summary.summaryProfile || {};
   const rt = summary.recommendationTrend?.trend?.[0] || {};
 
-  const priceHistory = history.map((bar) => ({
+  const priceHistory = validHistory.map((bar) => ({
     date: new Date(bar.date).toISOString().split('T')[0],
     open: parseFloat(safeNumber(bar.open).toFixed(4)),
     high: parseFloat(safeNumber(bar.high).toFixed(4)),
