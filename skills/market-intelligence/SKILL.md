@@ -69,6 +69,11 @@ Using the 30-day price history:
 - Aggregate sentiment into a single `sentimentScore` (average of headline scores).
 - Classify `sentimentLabel`: BULLISH (> 0.3), BEARISH (< −0.3), or NEUTRAL.
 
+### Step 4B — Retrieve Macro & Geopolitical Context
+- Collect recent macro headlines that can move the broader market, such as war escalation, sanctions, tariff or policy changes, Fed guidance, inflation, oil shocks, and recession-risk narratives.
+- Tag each macro headline with a theme such as `GEOPOLITICS`, `MONETARY_POLICY`, `POLITICS_POLICY`, `ENERGY_COMMODITIES`, `MARKET_STRESS`, or `SUPPLY_CHAIN`.
+- Aggregate the macro feed into a `macroContext` object with sentiment, risk level, dominant themes, and stock-specific impact notes.
+
 ### Step 5 — Analyst Consensus
 Aggregate analyst ratings:
 - Counts: strongBuy, buy, hold, sell, strongSell
@@ -109,6 +114,16 @@ Using all data collected above, produce a JSON `llmAnalysis` object with:
     "sentimentLabel": "BULLISH",
     "analystConsensus": { "strongBuy": 8, "buy": 12, "hold": 6, "sell": 2, "strongSell": 1, "targetHigh": 240, "targetLow": 165, "targetMean": 205, "upside": 10.5 },
     "news": [{ "title": "...", "source": "Reuters", "sentiment": 0.7, "hoursAgo": 2 }],
+    "macroContext": {
+      "available": true,
+      "sentimentScore": -0.18,
+      "sentimentLabel": "RISK_OFF",
+      "riskLevel": "HIGH",
+      "dominantThemes": [{ "theme": "GEOPOLITICS", "count": 2 }, { "theme": "MONETARY_POLICY", "count": 1 }],
+      "marketContext": "Macro tone is risk-off, led by geopolitics and monetary policy headlines.",
+      "impactNotes": ["AAPL may be exposed to supply-chain and policy shifts."],
+      "news": [{ "title": "...", "source": "Reuters", "theme": "GEOPOLITICS", "sentiment": -0.4, "hoursAgo": 3 }]
+    },
     "priceHistory": [{ "date": "2026-02-14", "close": 180.0, "volume": 55000000, "open": 179.0, "high": 181.0, "low": 178.5 }],
     "technicalIndicators": {
       "available": true,

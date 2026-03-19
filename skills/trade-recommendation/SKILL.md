@@ -3,7 +3,8 @@ name: trade-recommendation
 description: >
   Synthesizes market data and EDA insights into an actionable trade recommendation.
   Scores 15+ signals across trend, momentum, RSI, sentiment, analyst consensus, and
-  advanced technical indicators (MACD, Bollinger Bands, KDJ, OBV, VWAP),
+  advanced technical indicators (MACD, Bollinger Bands, KDJ, OBV, VWAP), plus
+  macro regime overlay signals from market-intelligence (risk-on/off and theme pressure),
   maps the aggregate score to a BUY / HOLD / SELL action with a confidence percentage,
   computes entry, stop-loss, take-profit, and risk/reward, then uses the LLM to
   generate a plain-English rationale and key risk factors.
@@ -67,6 +68,9 @@ Evaluate each signal below and accumulate a total `score`. Each signal adds or s
 |    |           | OBV falling (bearish) | −1 |
 | 12 | VWAP Position | Price > VWAP (institutional support) | +1 |
 |    |               | Price < VWAP (institutional resistance) | −1 |
+| 13 | Macro Regime | macro risk HIGH / RISK_OFF | −2 to −3 |
+|    |              | macro risk LOW / RISK_ON | +1 to +2 |
+|    |              | macro-sector theme headwind overlap | −1 |
 
 **Score Range:** −12 to +12 (theoretical max; typical: −8 to +8)
 

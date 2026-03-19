@@ -11,6 +11,99 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function average(values) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function dedupeArticlesByTitle(articles) {
+  const seen = new Set();
+  return (articles || []).filter((article) => {
+    const key = String(article?.title || '').trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function hoursAgoFromDate(value) {
+  if (!value) return 0;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return 0;
+  return Math.max(0, Math.round((Date.now() - timestamp) / 3600000));
+}
+
+const MACRO_THEME_RULES = [
+  {
+    theme: 'GEOPOLITICS',
+    keywords: ['war', 'conflict', 'missile', 'iran', 'israel', 'ukraine', 'russia', 'china', 'taiwan', 'sanction', 'ceasefire', 'military'],
+  },
+  {
+    theme: 'MONETARY_POLICY',
+    keywords: ['fed', 'federal reserve', 'interest rate', 'rate cut', 'rate hike', 'powell', 'ecb', 'boj', 'inflation', 'cpi', 'pce', 'yield'],
+  },
+  {
+    theme: 'POLITICS_POLICY',
+    keywords: ['white house', 'president', 'trump', 'biden', 'election', 'tariff', 'trade policy', 'congress', 'tax', 'regulation'],
+  },
+  {
+    theme: 'ENERGY_COMMODITIES',
+    keywords: ['oil', 'crude', 'gas', 'opec', 'commodity', 'gold', 'copper', 'shipping', 'strait of hormuz'],
+  },
+  {
+    theme: 'MARKET_STRESS',
+    keywords: ['selloff', 'risk-off', 'recession', 'volatility', 'vix', 'downgrade', 'credit spread', 'default', 'banking stress'],
+  },
+  {
+    theme: 'SUPPLY_CHAIN',
+    keywords: ['supply chain', 'factory', 'chip', 'semiconductor', 'shipping lane', 'port', 'export control'],
+  },
+];
+
+const SECTOR_THEME_HINTS = {
+  Technology: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'MONETARY_POLICY'],
+  Semiconductors: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'GEOPOLITICS'],
+  Financials: ['MONETARY_POLICY', 'MARKET_STRESS', 'POLITICS_POLICY'],
+  Energy: ['ENERGY_COMMODITIES', 'GEOPOLITICS', 'POLITICS_POLICY'],
+  'Automotive/EV': ['SUPPLY_CHAIN', 'ENERGY_COMMODITIES', 'POLITICS_POLICY'],
+  Industrials: ['SUPPLY_CHAIN', 'GEOPOLITICS', 'ENERGY_COMMODITIES'],
+  Healthcare: ['POLITICS_POLICY', 'MARKET_STRESS'],
+};
+
+function detectMacroTheme(text) {
+  const lower = String(text || '').toLowerCase();
+  for (const rule of MACRO_THEME_RULES) {
+    if (rule.keywords.some((keyword) => lower.includes(keyword))) {
+      return rule.theme;
+    }
+  }
+  return 'GENERAL_MACRO';
+}
+
+function summarizeThemeImpact(theme, sector, ticker) {
+  const sectorHints = SECTOR_THEME_HINTS[sector] || [];
+  const tickerLabel = ticker || 'this stock';
+  if (sectorHints.includes(theme)) {
+    switch (theme) {
+      case 'GEOPOLITICS':
+        return `${tickerLabel} may be sensitive to cross-border risk, sanctions, or defense-driven market repricing.`;
+      case 'MONETARY_POLICY':
+        return `${tickerLabel} may react to rate expectations, discount-rate changes, and liquidity conditions.`;
+      case 'POLITICS_POLICY':
+        return `${tickerLabel} may be exposed to regulatory, tariff, or election-policy shifts.`;
+      case 'ENERGY_COMMODITIES':
+        return `${tickerLabel} may feel margin pressure or support from commodity and energy moves.`;
+      case 'MARKET_STRESS':
+        return `${tickerLabel} may trade with broader risk appetite as volatility and drawdown pressure rise.`;
+      case 'SUPPLY_CHAIN':
+        return `${tickerLabel} may face delivery, sourcing, or export-control pressure through supply chains.`;
+      default:
+        return `${tickerLabel} may be influenced by the broader macro narrative.`;
+    }
+  }
+  return `${tickerLabel} has secondary exposure to the current ${theme.toLowerCase().replace(/_/g, ' ')} narrative.`;
+}
+
 // LLM batch sentiment scorer — scores all headlines in one API call
 async function scoreSentimentsWithLLM(headlines) {
   if (!headlines || headlines.length === 0) return [];
@@ -60,6 +153,123 @@ async function fetchFinnhubNews(ticker) {
     console.error('Finnhub news fetch failed:', error.message);
     return null;
   }
+}
+
+async function fetchFinnhubMacroNews() {
+  const apiKey = config.finnhubApiKey;
+  if (!apiKey) return [];
+
+  try {
+    const url = `https://finnhub.io/api/v1/news?category=general&token=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+
+    const filtered = data
+      .filter((article) => {
+        const text = `${article.headline || ''} ${article.summary || ''}`.toLowerCase();
+        return MACRO_THEME_RULES.some((rule) => rule.keywords.some((keyword) => text.includes(keyword)));
+      })
+      .slice(0, 8);
+
+    const scores = await scoreSentimentsWithLLM(filtered.map((article) => article.headline || ''));
+    return filtered.map((article, index) => ({
+      title: article.headline || '',
+      summary: article.summary || '',
+      url: article.url || '',
+      source: article.source || 'Finnhub General',
+      sentiment: scores[index] ?? 0,
+      hoursAgo: Math.round((Date.now() - (safeNumber(article.datetime) * 1000)) / 3600000),
+      theme: detectMacroTheme(`${article.headline || ''} ${article.summary || ''}`),
+      scope: 'macro',
+    }));
+  } catch (error) {
+    console.error('Finnhub macro news fetch failed:', error.message);
+    return [];
+  }
+}
+
+async function fetchNewsApiMacroNews() {
+  const apiKey = config.newsApiKey;
+  if (!apiKey) return [];
+
+  try {
+    const from = new Date(Date.now() - 5 * 24 * 3600 * 1000).toISOString();
+    const query = encodeURIComponent('((stock market OR equities OR s&p 500 OR nasdaq) AND (war OR fed OR inflation OR president OR tariff OR oil OR sanctions OR geopolitics))');
+    const url = `https://newsapi.org/v2/everything?q=${query}&language=en&sortBy=publishedAt&pageSize=8&from=${encodeURIComponent(from)}&apiKey=${apiKey}`;
+    const response = await fetch(url);
+    if (!response.ok) return [];
+
+    const payload = await response.json();
+    if (!Array.isArray(payload.articles)) return [];
+
+    const articles = payload.articles.slice(0, 8);
+    const scores = await scoreSentimentsWithLLM(articles.map((article) => article.title || ''));
+    return articles.map((article, index) => ({
+      title: article.title || '',
+      summary: article.description || article.content || '',
+      url: article.url || '',
+      source: article.source?.name || 'NewsAPI',
+      sentiment: scores[index] ?? 0,
+      hoursAgo: hoursAgoFromDate(article.publishedAt),
+      theme: detectMacroTheme(`${article.title || ''} ${article.description || ''}`),
+      scope: 'macro',
+    }));
+  } catch (error) {
+    console.error('NewsAPI macro news fetch failed:', error.message);
+    return [];
+  }
+}
+
+function buildMacroContext({ ticker, sector, macroNews = [] }) {
+  const articles = dedupeArticlesByTitle(macroNews)
+    .sort((left, right) => (left.hoursAgo ?? 0) - (right.hoursAgo ?? 0))
+    .slice(0, 6);
+  const score = parseFloat(average(articles.map((article) => safeNumber(article.sentiment))).toFixed(2));
+  const sentimentLabel = score > 0.25 ? 'RISK_ON' : score < -0.25 ? 'RISK_OFF' : 'BALANCED';
+
+  const themeCounts = articles.reduce((accumulator, article) => {
+    const theme = article.theme || 'GENERAL_MACRO';
+    accumulator[theme] = (accumulator[theme] || 0) + 1;
+    return accumulator;
+  }, {});
+
+  const dominantThemes = Object.entries(themeCounts)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([theme, count]) => ({ theme, count }));
+
+  const primaryTheme = dominantThemes[0]?.theme || 'GENERAL_MACRO';
+  const riskLevel = sentimentLabel === 'RISK_OFF' || ['GEOPOLITICS', 'MARKET_STRESS'].includes(primaryTheme)
+    ? 'HIGH'
+    : sentimentLabel === 'BALANCED'
+      ? 'MEDIUM'
+      : 'LOW';
+
+  const headline = articles[0]?.title || 'No major macro headlines captured.';
+  const marketContext = articles.length
+    ? `Macro tone is ${sentimentLabel.toLowerCase().replace('_', '-')}, led by ${dominantThemes.map((item) => item.theme.toLowerCase().replace(/_/g, ' ')).join(', ')} headlines. Latest focus: ${headline}`
+    : 'Macro feed unavailable; current view relies on ticker-specific news only.';
+
+  const impactNotes = dominantThemes.map((item) => summarizeThemeImpact(item.theme, sector, ticker));
+
+  return {
+    available: articles.length > 0,
+    sentimentScore: score,
+    sentimentLabel,
+    riskLevel,
+    dominantThemes,
+    marketContext,
+    impactNotes,
+    news: articles,
+    sourceBreakdown: {
+      articleCount: articles.length,
+      hasFinnhubMacro: articles.some((article) => String(article.source || '').toLowerCase().includes('finnhub')),
+      hasNewsApiMacro: articles.some((article) => String(article.source || '').toLowerCase().includes('newsapi')),
+    },
+  };
 }
 
 // Fetch analyst recommendation from Finnhub
@@ -290,6 +500,11 @@ async function fetchYahooFinanceData(ticker) {
     }
   })();
 
+  const [finnhubMacroNews, newsApiMacroNews] = await Promise.all([
+    fetchFinnhubMacroNews(),
+    fetchNewsApiMacroNews(),
+  ]);
+
   const sentimentScore = yahooNews.length > 0
     ? parseFloat((yahooNews.reduce((s, n) => s + (n.sentiment || 0), 0) / yahooNews.length).toFixed(2))
     : 0;
@@ -336,6 +551,11 @@ async function fetchYahooFinanceData(ticker) {
       upside: effectiveTargetMean > 0 ? parseFloat((((effectiveTargetMean - price) / price) * 100).toFixed(1)) : 0,
     },
     news: yahooNews,
+    macroContext: buildMacroContext({
+      ticker,
+      sector: sp.sector || sp.industry || 'Unknown',
+      macroNews: [...finnhubMacroNews, ...newsApiMacroNews],
+    }),
     priceHistory,
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
@@ -421,6 +641,39 @@ function generateMockMarketData(ticker) {
     { title: `Macro Headwinds Could Pressure ${ticker} in Near Term`, source: 'FT', sentiment: -0.3, hoursAgo: 24 },
   ];
 
+  const macroNews = [
+    {
+      title: 'Oil climbs as Middle East tensions keep traders in risk-control mode',
+      summary: 'Energy and freight-sensitive sectors are repricing geopolitical supply risk while broader equity futures trade cautiously.',
+      url: '',
+      source: 'Mock Macro Feed',
+      sentiment: -0.45,
+      hoursAgo: 3,
+      theme: 'GEOPOLITICS',
+      scope: 'macro',
+    },
+    {
+      title: 'Fed officials signal patience as markets push back rate-cut timing',
+      summary: 'Higher-for-longer rates are supporting the dollar and pressuring long-duration growth multiples.',
+      url: '',
+      source: 'Mock Macro Feed',
+      sentiment: -0.2,
+      hoursAgo: 9,
+      theme: 'MONETARY_POLICY',
+      scope: 'macro',
+    },
+    {
+      title: 'Election rhetoric revives tariff and industrial-policy scenarios',
+      summary: 'Investors are reassessing which sectors would benefit from domestic manufacturing support and which would absorb higher import costs.',
+      url: '',
+      source: 'Mock Macro Feed',
+      sentiment: -0.1,
+      hoursAgo: 16,
+      theme: 'POLITICS_POLICY',
+      scope: 'macro',
+    },
+  ];
+
   return {
     ticker,
     name: stockInfo.name,
@@ -455,6 +708,11 @@ function generateMockMarketData(ticker) {
       upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
     },
     news,
+    macroContext: buildMacroContext({
+      ticker,
+      sector: stockInfo.sector,
+      macroNews,
+    }),
     priceHistory,
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
@@ -567,6 +825,11 @@ async function fetchAlphaVantageMarketData(ticker) {
     ]);
   }
 
+  const [finnhubMacroNews, newsApiMacroNews] = await Promise.all([
+    fetchFinnhubMacroNews(),
+    fetchNewsApiMacroNews(),
+  ]);
+
   // Use Finnhub data if available, otherwise use fallbacks
   const name = finnhubProfile?.name || `${ticker} Corp.`;
   const sector = finnhubProfile?.sector || 'Unknown';
@@ -634,6 +897,11 @@ async function fetchAlphaVantageMarketData(ticker) {
       upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
     },
     news,
+    macroContext: buildMacroContext({
+      ticker,
+      sector,
+      macroNews: [...finnhubMacroNews, ...newsApiMacroNews],
+    }),
     priceHistory,
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
@@ -649,6 +917,7 @@ async function fetchAlphaVantageMarketData(ticker) {
 }
 
 function buildFallbackAnalysis(ticker, marketData) {
+  const macroText = marketData?.macroContext?.marketContext || 'Macro context unavailable.';
   return {
     summary: `${ticker} is trading at $${marketData.price} with a ${marketData.trend} trend.`,
     keyTrends: [
@@ -656,8 +925,8 @@ function buildFallbackAnalysis(ticker, marketData) {
       `Sentiment: ${marketData.sentimentLabel}`,
       `Price vs MA50: ${((marketData.price / marketData.ma50 - 1) * 100).toFixed(1)}%`,
     ],
-    riskFlags: [],
-    marketContext: 'LLM analysis unavailable - check API key.',
+    riskFlags: marketData?.macroContext?.riskLevel === 'HIGH' ? ['Macro risk is elevated from current global headlines.'] : [],
+    marketContext: `LLM analysis unavailable - check API key. ${macroText}`,
   };
 }
 

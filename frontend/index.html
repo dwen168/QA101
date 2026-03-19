@@ -607,6 +607,7 @@ function renderPortfolioOptimization(result, panel) {
   const sectors = result.sectorAnalysis || [];
   const div = result.diversificationMetrics || {};
   const narrative = result.llmNarrative || {};
+  const macro = result.macroRegime || {};
 
   const section = document.createElement('div');
   section.className = 'section-divider fade-in';
@@ -630,19 +631,39 @@ function renderPortfolioOptimization(result, panel) {
   `;
   panel.appendChild(summary);
 
+  if (macro.available) {
+    const macroCard = document.createElement('div');
+    macroCard.className = 'card fade-in';
+    const macroColor = macro.riskLevel === 'HIGH' ? 'var(--red)' : macro.riskLevel === 'LOW' ? 'var(--green)' : 'var(--amber)';
+    macroCard.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">Portfolio Macro Regime</span>
+        <span style="font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:4px;background:${macro.riskLevel === 'HIGH' ? 'rgba(255,75,110,0.1)' : macro.riskLevel === 'LOW' ? 'rgba(16,232,152,0.1)' : 'rgba(245,166,35,0.1)'};color:${macroColor};border:1px solid ${macro.riskLevel === 'HIGH' ? 'rgba(255,75,110,0.2)' : macro.riskLevel === 'LOW' ? 'rgba(16,232,152,0.2)' : 'rgba(245,166,35,0.2)'}">${macro.riskLevel} RISK</span>
+      </div>
+      <div class="ticker-stats" style="margin-top:0;padding-top:0;border-top:none;grid-template-columns:repeat(3,1fr)">
+        <div class="stat-item"><span class="stat-label">MACRO TONE</span><span class="stat-value" style="color:${macroColor}">${macro.sentimentLabel} (${macro.sentimentScore > 0 ? '+' : ''}${(macro.sentimentScore ?? 0).toFixed(2)})</span></div>
+        <div class="stat-item"><span class="stat-label">DOMINANT THEMES</span><span class="stat-value">${(macro.dominantThemes || []).slice(0, 2).map(item => String(item.theme || '').replace(/_/g, ' ')).join(' · ') || 'None'}</span></div>
+        <div class="stat-item"><span class="stat-label">SOURCES</span><span class="stat-value">${macro.sourceCount || 0} ticker feeds</span></div>
+      </div>
+      <p style="margin-top:10px;font-size:12px;color:var(--text2)">${macro.marketContext || ''}</p>
+    `;
+    panel.appendChild(macroCard);
+  }
+
   const ranking = document.createElement('div');
   ranking.className = 'card fade-in';
   ranking.innerHTML = `
     <div class="card-header"><span class="card-title">Ranked Tickers</span></div>
-    <div style="display:grid;grid-template-columns:50px 90px 90px 80px 90px;gap:8px;font-size:10px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border)">
-      <span>Rank</span><span>Ticker</span><span>Action</span><span>Score</span><span>Alloc</span>
+    <div style="display:grid;grid-template-columns:50px 90px 90px 100px 90px 90px;gap:8px;font-size:10px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border)">
+      <span>Rank</span><span>Ticker</span><span>Action</span><span>Score</span><span>Macro Adj</span><span>Alloc</span>
     </div>
     ${(ranked || []).map(r => `
-      <div style="display:grid;grid-template-columns:50px 90px 90px 80px 90px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--mono)">
+      <div style="display:grid;grid-template-columns:50px 90px 90px 100px 90px 90px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--mono)">
         <span style="color:var(--text3)">#${r.rank}</span>
         <span style="color:var(--cyan)">${r.ticker}</span>
         <span style="color:${r.action && r.action.includes('BUY') ? 'var(--green)' : r.action === 'SELL' ? 'var(--red)' : 'var(--amber)'}">${r.action || 'HOLD'}</span>
-        <span>${(r.compositeScore ?? 0).toFixed(1)}</span>
+        <span>${(r.compositeScore ?? 0).toFixed(1)} <span style="color:var(--text3)">(${(r.baseCompositeScore ?? r.compositeScore ?? 0).toFixed(1)})</span></span>
+        <span style="color:${(r.macroAdjustment ?? 0) < 0 ? 'var(--red)' : (r.macroAdjustment ?? 0) > 0 ? 'var(--green)' : 'var(--text2)'}">${(r.macroAdjustment ?? 0) > 0 ? '+' : ''}${(r.macroAdjustment ?? 0).toFixed(1)}</span>
         <span>${(r.allocation ?? 0).toFixed(1)}%</span>
       </div>
     `).join('')}
@@ -832,6 +853,10 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   const trendClass = d.trend === 'BULLISH' ? 'bullish' : d.trend === 'BEARISH' ? 'bearish' : 'neutral';
   const sentColor = d.sentimentScore > 0.1 ? 'var(--green)' : d.sentimentScore < -0.1 ? 'var(--red)' : 'var(--amber)';
   const sentPct = ((d.sentimentScore + 1) / 2 * 100).toFixed(0);
+  const macro = d.macroContext || {};
+  const macroScore = Number.isFinite(macro.sentimentScore) ? macro.sentimentScore : 0;
+  const macroColor = macroScore > 0.1 ? 'var(--green)' : macroScore < -0.1 ? 'var(--red)' : 'var(--amber)';
+  const macroPct = ((macroScore + 1) / 2 * 100).toFixed(0);
 
   const fmtNum = (n) => n?.toLocaleString('en-US', { maximumFractionDigits: 2 }) ?? '—';
 
@@ -972,6 +997,51 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
     `;
     panel.appendChild(summary);
   }
+
+  const macroCard = document.createElement('div');
+  macroCard.className = 'card fade-in';
+  macroCard.innerHTML = `
+    <div class="card-header">
+      <span class="card-title">Macro Context</span>
+      <span style="font-size:10px;font-family:var(--mono);padding:2px 7px;border-radius:4px;background:${macro.riskLevel === 'HIGH' ? 'rgba(255,75,110,0.1)' : macro.riskLevel === 'LOW' ? 'rgba(16,232,152,0.1)' : 'rgba(245,166,35,0.1)'};color:${macro.riskLevel === 'HIGH' ? 'var(--red)' : macro.riskLevel === 'LOW' ? 'var(--green)' : 'var(--amber)'};border:1px solid ${macro.riskLevel === 'HIGH' ? 'rgba(255,75,110,0.2)' : macro.riskLevel === 'LOW' ? 'rgba(16,232,152,0.2)' : 'rgba(245,166,35,0.2)'}">${macro.riskLevel || 'N/A'} RISK</span>
+    </div>
+    <div class="ticker-stats" style="margin-top:0;padding-top:0;border-top:none;grid-template-columns:repeat(3,1fr)">
+      <div class="stat-item">
+        <span class="stat-label">MACRO TONE</span>
+        <span class="stat-value" style="color:${macroColor}">${macro.sentimentLabel || 'UNAVAILABLE'}${macro.available ? ` (${macroScore > 0 ? '+' : ''}${macroScore.toFixed(2)})` : ''}</span>
+        <div class="sentiment-bar" style="margin-top:8px"><div class="sentiment-fill" style="width:${macro.available ? macroPct : 50}%;background:${macroColor}"></div></div>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">DOMINANT THEMES</span>
+        <span class="stat-value">${(macro.dominantThemes || []).slice(0, 2).map(item => item.theme.replace(/_/g, ' ')).join(' · ') || 'None'}</span>
+      </div>
+      <div class="stat-item">
+        <span class="stat-label">MACRO FEED</span>
+        <span class="stat-value">${macro.available ? `${macro.sourceBreakdown?.articleCount || 0} articles` : 'Unavailable'}</span>
+      </div>
+    </div>
+    <p style="font-size:13px;line-height:1.6;color:var(--text2);margin-top:12px">${macro.marketContext || 'No macro context was returned.'}</p>
+    ${(macro.impactNotes || []).length ? `<div style="margin-top:12px;display:flex;flex-direction:column;gap:6px">${macro.impactNotes.map(note => `<div class="insight-item"><div class="insight-dot"></div>${note}</div>`).join('')}</div>` : ''}
+    ${(macro.news || []).length ? `
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+        <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">Macro Headlines</div>
+        ${(macro.news || []).slice(0, 3).map(item => `
+          <div class="news-item" style="padding:8px 0">
+            <div>
+              <div class="news-title">${item.url ? `<a href="${item.url}" target="_blank" rel="noopener noreferrer">${item.title}</a>` : item.title}</div>
+              <div class="news-meta">
+                <span class="news-source">${item.source}</span>
+                <span class="news-time">${item.hoursAgo}h ago</span>
+                <span class="detail-chip">${String(item.theme || 'GENERAL_MACRO').replace(/_/g, ' ')}</span>
+              </div>
+            </div>
+            <span class="news-sentiment ${item.sentiment > 0.1 ? 'pos' : item.sentiment < -0.1 ? 'neg' : 'neutral'}">${item.sentiment > 0 ? '+' : ''}${Number(item.sentiment || 0).toFixed(2)}</span>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+  `;
+  panel.appendChild(macroCard);
 
   // News
   const newsCard = document.createElement('div');
@@ -1177,6 +1247,7 @@ function renderRecommendation(rec, panel) {
       </div>
     </div>
     <div class="rr-badge" style="background:${rrColor}15;color:${rrColor};border:1px solid ${rrColor}30">Risk/Reward: ${rec.riskReward}:1 · ${rec.timeHorizon} term</div>
+    ${rec.macroOverlay?.available ? `<div class="rr-badge" style="margin-top:8px;background:${rec.macroOverlay.riskLevel === 'HIGH' ? 'var(--red-dim)' : rec.macroOverlay.riskLevel === 'LOW' ? 'var(--green-dim)' : 'var(--amber-dim)'};color:${rec.macroOverlay.riskLevel === 'HIGH' ? 'var(--red)' : rec.macroOverlay.riskLevel === 'LOW' ? 'var(--green)' : 'var(--amber)'};border:1px solid ${rec.macroOverlay.riskLevel === 'HIGH' ? 'rgba(255,75,110,0.35)' : rec.macroOverlay.riskLevel === 'LOW' ? 'rgba(16,232,152,0.35)' : 'rgba(245,166,35,0.35)'}">Macro Overlay: ${rec.macroOverlay.riskLevel} · ${rec.macroOverlay.sentimentLabel}${(rec.macroOverlay.dominantThemes || []).length ? ` · ${rec.macroOverlay.dominantThemes.map(t => t.theme).join(', ')}` : ''}</div>` : ''}
 
     ${rec.rationale ? `<p style="font-size:13px;line-height:1.6;color:var(--text2);margin-top:14px">${rec.rationale}</p>` : ''}
 

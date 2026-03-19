@@ -80,6 +80,11 @@ function scoreSignals(marketData) {
   const signals = [];
   let score = 0;
 
+  const macroWeight = (key, fallback) => {
+    const value = getSignalWeight(key);
+    return value === 0 ? fallback : value;
+  };
+
   // detail: { label, value } pairs shown as chips in the UI
   const add = (name, points, reason, detail = null) => {
     signals.push({ name, points, reason, detail });
@@ -155,6 +160,58 @@ function scoreSignals(marketData) {
       { label: 'Score', value: fmt(sent, 2) },
       { label: 'Label', value: marketData.sentimentLabel },
     ]);
+  }
+
+  // Macro regime overlay signals
+  const macro = marketData.macroContext;
+  if (macro && macro.available) {
+    const macroThemes = (macro.dominantThemes || []).map((item) => item.theme);
+    const macroRisk = String(macro.riskLevel || 'MEDIUM').toUpperCase();
+    const macroSent = Number(macro.sentimentScore || 0);
+
+    if (macroRisk === 'HIGH') {
+      add('Macro Risk-Off', macroWeight('macro_risk_high', -2), 'Global macro backdrop is risk-off; tighten conviction.', [
+        { label: 'Risk', value: macroRisk },
+        { label: 'Tone', value: macro.sentimentLabel || 'RISK_OFF' },
+        { label: 'Score', value: fmt(macroSent, 2) },
+      ]);
+    } else if (macroRisk === 'LOW') {
+      add('Macro Tailwind', macroWeight('macro_risk_low', 1), 'Macro backdrop is supportive for risk assets.', [
+        { label: 'Risk', value: macroRisk },
+        { label: 'Tone', value: macro.sentimentLabel || 'RISK_ON' },
+        { label: 'Score', value: fmt(macroSent, 2) },
+      ]);
+    }
+
+    if (macroSent <= -0.25) {
+      add('Macro Sentiment Bearish', macroWeight('macro_sentiment_bearish', -1), 'Global macro headlines lean defensive.', [
+        { label: 'Score', value: fmt(macroSent, 2) },
+        { label: 'Themes', value: macroThemes.slice(0, 2).join(', ') || 'General' },
+      ]);
+    } else if (macroSent >= 0.25) {
+      add('Macro Sentiment Supportive', macroWeight('macro_sentiment_bullish', 1), 'Global macro sentiment supports risk-taking.', [
+        { label: 'Score', value: `+${fmt(macroSent, 2)}` },
+        { label: 'Themes', value: macroThemes.slice(0, 2).join(', ') || 'General' },
+      ]);
+    }
+
+    const sector = String(marketData.sector || 'Unknown');
+    const sectorThemeHints = {
+      Technology: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'MONETARY_POLICY'],
+      Semiconductors: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'GEOPOLITICS'],
+      Financials: ['MONETARY_POLICY', 'MARKET_STRESS', 'POLITICS_POLICY'],
+      Energy: ['ENERGY_COMMODITIES', 'GEOPOLITICS', 'POLITICS_POLICY'],
+      'Automotive/EV': ['SUPPLY_CHAIN', 'ENERGY_COMMODITIES', 'POLITICS_POLICY'],
+      Industrials: ['SUPPLY_CHAIN', 'GEOPOLITICS', 'ENERGY_COMMODITIES'],
+      Healthcare: ['POLITICS_POLICY', 'MARKET_STRESS'],
+    };
+    const overlapThemes = (sectorThemeHints[sector] || []).filter((theme) => macroThemes.includes(theme));
+    if (macroRisk === 'HIGH' && overlapThemes.length) {
+      add('Macro-Sector Headwind', macroWeight('macro_sector_headwind', -1), `Current macro themes directly pressure ${sector}.`, [
+        { label: 'Sector', value: sector },
+        { label: 'Themes', value: overlapThemes.join(', ') },
+      ]);
+    }
   }
 
   // Analyst consensus signals
@@ -315,10 +372,20 @@ function mapAction(score) {
 }
 
 function buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio) {
+  const macro = marketData?.macroContext || {};
+  const macroSentence = macro.available
+    ? `Macro regime is ${String(macro.riskLevel || 'MEDIUM').toLowerCase()} risk (${macro.sentimentLabel || 'BALANCED'}), which is included in signal scoring.`
+    : 'Macro regime data is limited, so conviction relies more on ticker-level signals.';
+
+  const keyRisks = ['Market volatility', 'Sector headwinds', 'RSI extended'];
+  if (macro.riskLevel === 'HIGH') {
+    keyRisks.unshift('Elevated macro and geopolitical risk regime');
+  }
+
   return {
-    rationale: `Based on technical and sentiment analysis, ${marketData.ticker} shows a ${marketData.trend} setup with ${marketData.rsi > 50 ? 'positive' : 'weakening'} momentum. Analyst consensus supports the view with ${(buyRatio * 100).toFixed(0)}% buy ratings.`,
+    rationale: `Based on technical, sentiment, and macro regime analysis, ${marketData.ticker} shows a ${marketData.trend} setup with ${marketData.rsi > 50 ? 'positive' : 'weakening'} momentum. Analyst consensus supports the view with ${(buyRatio * 100).toFixed(0)}% buy ratings. ${macroSentence}`,
     timeHorizon: 'MEDIUM',
-    keyRisks: ['Market volatility', 'Sector headwinds', 'RSI extended'],
+    keyRisks,
     executiveSummary: `${marketData.ticker} - ${action} recommendation based on ${signals.length} signals with ${confidence}% confidence.`,
   };
 }
@@ -328,7 +395,13 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
 
   const { signals, score, buyRatio } = scoreSignals(marketData);
   const { action, actionColor } = mapAction(score);
-  const confidence = Math.min(95, Math.floor((Math.abs(score) / 12) * 100 + 40));
+  const baseConfidence = Math.min(95, Math.floor((Math.abs(score) / 12) * 100 + 40));
+  const macroRisk = String(marketData?.macroContext?.riskLevel || '').toUpperCase();
+  const confidence = macroRisk === 'HIGH'
+    ? Math.max(35, baseConfidence - 8)
+    : macroRisk === 'LOW'
+      ? Math.min(95, baseConfidence + 3)
+      : baseConfidence;
 
   const entry = marketData.price;
 
@@ -354,7 +427,7 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
 
   const llm = dependencies.callDeepSeek || callDeepSeek;
   const systemPrompt = `You are a senior quantitative analyst running the trade-recommendation skill.\n\n${skills['trade-recommendation']}\n\nSynthesize all signals and write a clear trade recommendation.`;
-  const userMessage = `Write a trade recommendation for ${marketData.ticker}. Action: ${action}. Score: ${score}. Key signals: ${signals.map((signal) => `${signal.name}(${signal.points > 0 ? '+' : ''}${signal.points})`).join(', ')}. Return JSON with: rationale (2-3 sentences), timeHorizon (SHORT/MEDIUM/LONG), keyRisks (array of 2-3 strings), executiveSummary (1 sentence plain English). Additional EDA context: ${JSON.stringify(edaInsights || {}, null, 2)}`;
+  const userMessage = `Write a trade recommendation for ${marketData.ticker}. Action: ${action}. Score: ${score}. Key signals: ${signals.map((signal) => `${signal.name}(${signal.points > 0 ? '+' : ''}${signal.points})`).join(', ')}. Return JSON with: rationale (2-3 sentences), timeHorizon (SHORT/MEDIUM/LONG), keyRisks (array of 2-3 strings), executiveSummary (1 sentence plain English). Additional EDA context: ${JSON.stringify(edaInsights || {}, null, 2)}. Macro context: ${JSON.stringify(marketData.macroContext || {}, null, 2)}`;
 
   let llmRecommendation;
   try {
@@ -382,6 +455,12 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
       stopLoss,
       takeProfit,
       riskReward,
+      macroOverlay: {
+        available: !!marketData?.macroContext?.available,
+        riskLevel: marketData?.macroContext?.riskLevel || 'UNKNOWN',
+        sentimentLabel: marketData?.macroContext?.sentimentLabel || 'UNKNOWN',
+        dominantThemes: (marketData?.macroContext?.dominantThemes || []).slice(0, 3),
+      },
       ...llmRecommendation,
       historicalPatterns,
       disclaimer: 'WARNING: For educational/demo purposes only. Not financial advice.',

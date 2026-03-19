@@ -4,7 +4,8 @@ description: >
   Analyzes multiple stocks in a portfolio context, computing correlation matrices,
   sector rotation insights, and multi-factor scores to rank and recommend the
   optimal securities. Produces a ranked buy/hold/sell action list with diversification
-  metrics and relative value comparison.
+  metrics and relative value comparison, with macro-regime overlays (geopolitical,
+  monetary-policy, and market-stress context) applied to scoring and allocations.
 metadata:
   version: "1.0.0"
   author: QuantBot
@@ -116,6 +117,11 @@ Assign action based on score and market conditions:
 | < 30 | SELL | 0% (exit) |
 
 Allocations should sum to ≤ 100% (allow cash buffer).
+
+### Step 5B — Macro Regime Overlay
+- Aggregate `macroContext` from each ticker's market-intelligence output into a portfolio-level macro regime.
+- When macro risk is HIGH, apply defensive score penalties and reduce position sizing; when LOW, allow mild risk-on tilts.
+- Apply additional sector-specific adjustments when dominant macro themes directly pressure sector exposures.
 
 ### Step 6 — Diversification Metrics
 Compute:

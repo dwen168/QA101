@@ -10,6 +10,108 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function computeMacroRegime(marketDataArray) {
+  const macroContexts = (marketDataArray || [])
+    .map((item) => item?.macroContext)
+    .filter((macro) => macro && macro.available);
+
+  if (macroContexts.length === 0) {
+    return {
+      available: false,
+      sentimentScore: 0,
+      sentimentLabel: 'UNAVAILABLE',
+      riskLevel: 'MEDIUM',
+      dominantThemes: [],
+      marketContext: 'Macro regime unavailable. Portfolio uses ticker-level factors only.',
+      sourceCount: 0,
+    };
+  }
+
+  const sentimentScore = macroContexts.reduce((sum, macro) => sum + safeNumber(macro.sentimentScore), 0) / macroContexts.length;
+  const sentimentLabel = sentimentScore > 0.25 ? 'RISK_ON' : sentimentScore < -0.25 ? 'RISK_OFF' : 'BALANCED';
+
+  const riskOrder = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+  const riskLevel = macroContexts
+    .map((macro) => String(macro.riskLevel || 'MEDIUM').toUpperCase())
+    .sort((left, right) => (riskOrder[right] || 2) - (riskOrder[left] || 2))[0] || 'MEDIUM';
+
+  const themeCounts = {};
+  for (const macro of macroContexts) {
+    for (const item of macro.dominantThemes || []) {
+      const theme = String(item.theme || 'GENERAL_MACRO').toUpperCase();
+      themeCounts[theme] = (themeCounts[theme] || 0) + safeNumber(item.count, 1);
+    }
+  }
+  const dominantThemes = Object.entries(themeCounts)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 3)
+    .map(([theme, count]) => ({ theme, count }));
+
+  const marketContext = macroContexts[0]?.marketContext || 'Macro regime captured from market-intelligence.';
+
+  return {
+    available: true,
+    sentimentScore: parseFloat(sentimentScore.toFixed(2)),
+    sentimentLabel,
+    riskLevel,
+    dominantThemes,
+    marketContext,
+    sourceCount: macroContexts.length,
+  };
+}
+
+function getMacroAdjustmentForTicker(marketData, macroRegime) {
+  if (!macroRegime || !macroRegime.available) {
+    return { adjustment: 0, reasons: [] };
+  }
+
+  const sector = String(marketData.sector || 'Unknown');
+  const themes = (macroRegime.dominantThemes || []).map((item) => item.theme);
+  const reasons = [];
+  let adjustment = 0;
+
+  if (macroRegime.riskLevel === 'HIGH') {
+    adjustment -= 6;
+    reasons.push('High macro risk regime');
+  } else if (macroRegime.riskLevel === 'MEDIUM') {
+    adjustment -= 2;
+    reasons.push('Moderate macro uncertainty');
+  } else if (macroRegime.riskLevel === 'LOW') {
+    adjustment += 1;
+    reasons.push('Supportive macro regime');
+  }
+
+  const sectorThemeHints = {
+    Technology: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'MONETARY_POLICY'],
+    Semiconductors: ['SUPPLY_CHAIN', 'POLITICS_POLICY', 'GEOPOLITICS'],
+    Financials: ['MONETARY_POLICY', 'MARKET_STRESS', 'POLITICS_POLICY'],
+    Energy: ['ENERGY_COMMODITIES', 'GEOPOLITICS', 'POLITICS_POLICY'],
+    'Automotive/EV': ['SUPPLY_CHAIN', 'ENERGY_COMMODITIES', 'POLITICS_POLICY'],
+    Industrials: ['SUPPLY_CHAIN', 'GEOPOLITICS', 'ENERGY_COMMODITIES'],
+    Healthcare: ['POLITICS_POLICY', 'MARKET_STRESS'],
+  };
+  const overlap = (sectorThemeHints[sector] || []).filter((theme) => themes.includes(theme));
+
+  if (macroRegime.riskLevel === 'HIGH' && overlap.length) {
+    adjustment -= 2;
+    reasons.push(`Macro themes pressure ${sector} (${overlap.join(', ')})`);
+  }
+
+  if (sector === 'Energy' && themes.includes('ENERGY_COMMODITIES') && macroRegime.riskLevel !== 'LOW') {
+    adjustment += 2;
+    reasons.push('Energy may benefit from commodity-risk regime');
+  }
+
+  return {
+    adjustment: parseFloat(adjustment.toFixed(1)),
+    reasons,
+  };
+}
+
 // Compute momentum score for a single stock (0-100)
 function computeMomentumScore(marketData) {
   const { price, priceHistory, ma50 } = marketData;
@@ -323,29 +425,49 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   if (marketDataArray.length === 0) {
     throw new Error('No valid market data could be retrieved for any ticker');
   }
+
+  const macroRegime = computeMacroRegime(marketDataArray);
   
   // Compute factor scores
   const scores = marketDataArray.map(md => computeCompositeScore(md, marketDataArray, timeHorizon));
   
   // Create ranked list
-  const rankedData = marketDataArray.map((md, idx) => ({
-    ...md,
-    ...scores[idx],
-  }));
+  const rankedData = marketDataArray.map((md, idx) => {
+    const baseScores = scores[idx];
+    const macroAdj = getMacroAdjustmentForTicker(md, macroRegime);
+    const adjustedComposite = clamp(baseScores.composite + macroAdj.adjustment, 0, 100);
+    return {
+      ...md,
+      ...baseScores,
+      macroAdjustment: macroAdj.adjustment,
+      macroReasons: macroAdj.reasons,
+      adjustedComposite: parseFloat(adjustedComposite.toFixed(1)),
+    };
+  });
   
-  rankedData.sort((a, b) => b.composite - a.composite);
+  rankedData.sort((a, b) => b.adjustedComposite - a.adjustedComposite);
+
+  const allocationScale = macroRegime.riskLevel === 'HIGH'
+    ? 0.75
+    : macroRegime.riskLevel === 'LOW'
+      ? 1.05
+      : 1.0;
   
   // Assign actions and allocations
   const rankedTickers = rankedData.map((data, rank) => {
-    const { action, allocation } = getActionFromScore(data.composite);
+    const { action, allocation } = getActionFromScore(data.adjustedComposite);
+    const scaledAllocation = clamp(allocation * allocationScale, 0, 10);
     return {
       rank: rank + 1,
       ticker: data.ticker,
       name: data.name,
       sector: data.sector,
       action,
-      compositeScore: data.composite,
-      allocation,
+      compositeScore: data.adjustedComposite,
+      baseCompositeScore: data.composite,
+      macroAdjustment: data.macroAdjustment,
+      macroReasons: data.macroReasons,
+      allocation: parseFloat(scaledAllocation.toFixed(1)),
       scores: {
         momentum: data.momentum,
         quality: data.quality,
@@ -388,6 +510,7 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
     rankedTickers: rankedTickers.slice(0, 10),
     sectorAnalysis: sectorAnalysis.slice(0, 5),
     diversificationMetrics,
+    macroRegime,
     expectedReturn,
   }, null, 2)}. Return JSON with: executiveSummary, sectorRotationInsight, diversificationAssessment, recommendations (array), riskWarnings (array).`;
   
@@ -405,12 +528,24 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   } catch (error) {
     console.error('LLM narrative failed:', error.message);
   }
+
+  if (macroRegime.available) {
+    const macroText = `Macro regime: ${macroRegime.riskLevel} risk (${macroRegime.sentimentLabel}, ${macroRegime.sentimentScore}).`;
+    llmNarrative.executiveSummary = llmNarrative.executiveSummary
+      ? `${llmNarrative.executiveSummary} ${macroText}`
+      : macroText;
+  }
+  if (macroRegime.riskLevel === 'HIGH') {
+    llmNarrative.recommendations = Array.from(new Set([...(llmNarrative.recommendations || []), 'Increase cash buffer and reduce high-beta concentration while macro risk remains elevated.']));
+    llmNarrative.riskWarnings = Array.from(new Set([...(llmNarrative.riskWarnings || []), 'Macro risk regime is HIGH; drawdown probability is elevated across correlated risk assets.']));
+  }
   
   return {
     rankedTickers,
     correlationMatrix,
     sectorAnalysis,
     diversificationMetrics,
+    macroRegime,
     portfolioMetrics: {
       totalAllocation: totalAllocation,
       cashBuffer: 100 - totalAllocation,

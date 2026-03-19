@@ -6,6 +6,9 @@ An agent-skills–based stock analysis chatbot powered by **DeepSeek AI** with f
 
 - Portfolio optimization can now be triggered directly from the UI chatbot with natural-language prompts such as `Optimize portfolio AAPL, MSFT, NVDA`.
 - Backtesting can now be triggered directly from the UI chatbot with prompts such as `Backtest AAPL from 2025-01-01 to 2026-03-18`.
+- Market intelligence now includes a macro/geopolitical context layer, so global headlines such as wars, Fed tone, tariffs, and oil shocks can be surfaced alongside ticker-specific news.
+- Trade recommendation now uses the macro regime as a scoring overlay, affecting signal totals, confidence, and key risk flags.
+- Portfolio optimization now applies macro-regime tilts to ranking and allocations, including defensive cash-bias in high-risk regimes.
 - News cards now show richer article context with summaries and source links instead of headline-only display.
 - News summaries are collapsible, so the analysis panel stays compact while keeping source detail available on demand.
 - MACD signal-line calculation now uses the standard EMA-based MACD(12,26,9) method.
@@ -145,9 +148,10 @@ The executable skill logic lives directly in each skill folder under `scripts/`.
 - Fetches price data, moving averages, RSI from Alpha Vantage (live or mock fallback)
 - Calculates advanced technical indicators: **MACD, Bollinger Bands, KDJ, OBV, VWAP**
 - Retrieves news headlines from Finnhub with rule-based sentiment scoring (VADER-like)
+- Retrieves macro/geopolitical headlines and tags them into themes such as geopolitics, Fed or policy, tariffs, energy, and market stress
 - Aggregates analyst consensus ratings from Finnhub
 - Pulls real P/E, EPS, and market cap from Finnhub when available
-- Returns structured `MarketIntelligenceReport` with full technical + fundamental + sentiment data
+- Returns structured `MarketIntelligenceReport` with technical, fundamental, ticker-news, and macro-context data
 
 ### Skill 2: eda-visual-analysis
 - Accepts `MarketIntelligenceReport` as input

@@ -66,6 +66,11 @@ function getDefaultWeights() {
       obv_bearish: { points: -1 },
       vwap_above: { points: 1 },
       vwap_below: { points: -1 },
+      macro_risk_high: { points: -2 },
+      macro_risk_low: { points: 1 },
+      macro_sentiment_bearish: { points: -1 },
+      macro_sentiment_bullish: { points: 1 },
+      macro_sector_headwind: { points: -1 },
     },
     model_metrics: {
       status: 'Hardcoded defaults (no calibration run yet)'

@@ -108,6 +108,26 @@
     "vwap_below": {
       "points": -1,
       "description": "Price < VWAP (bearish positioning)"
+    },
+    "macro_risk_high": {
+      "points": -2,
+      "description": "Macro regime is high-risk / risk-off"
+    },
+    "macro_risk_low": {
+      "points": 1,
+      "description": "Macro regime is low-risk / risk-on"
+    },
+    "macro_sentiment_bearish": {
+      "points": -1,
+      "description": "Macro headline sentiment is bearish"
+    },
+    "macro_sentiment_bullish": {
+      "points": 1,
+      "description": "Macro headline sentiment is supportive"
+    },
+    "macro_sector_headwind": {
+      "points": -1,
+      "description": "Dominant macro themes create direct sector headwinds"
     }
   },
   "calibration_notes": {
