@@ -119,16 +119,17 @@ function computeMomentumScore(marketData) {
   
   if (closes.length < 30) return 50; // neutral if not enough data
   
-  const price1d = closes[closes.length - 1];
-  const price5d = closes[Math.max(0, closes.length - 5)];
-  const price30d = closes[0];
+  const latest   = closes[closes.length - 1];
+  const prev1d   = closes[closes.length - 2];
+  const prev5d   = closes[Math.max(0, closes.length - 6)];
+  const prev30d  = closes[Math.max(0, closes.length - 31)];
   
-  const mom1d = ((price1d - closes[closes.length - 2]) / closes[closes.length - 2]) * 100 || 0;
-  const mom5d = ((price5d - price1d) / price1d) * 100 || 0;
-  const mom30d = ((price30d - price30d) / price30d) * 100 || 0;
+  const mom1d  = ((latest - prev1d)  / prev1d)  * 100 || 0;
+  const mom5d  = ((latest - prev5d)  / prev5d)  * 100 || 0;
+  const mom30d = ((latest - prev30d) / prev30d) * 100 || 0;
   
   const avgMom = (mom1d + mom5d + mom30d) / 3;
-  const ma50Slope = ((price - ma50) / ma50) * 100 || 0;
+  const ma50Slope = (ma50 ? ((price - ma50) / ma50) * 100 : 0);
   
   const momentumScore = 50 + (avgMom + ma50Slope) / 2;
   return Math.max(0, Math.min(100, momentumScore));

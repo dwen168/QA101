@@ -192,7 +192,7 @@ function generateSignal(priceData, index, signalType = 'trade-recommendation') {
   // Bollinger Bands signal
   const bb = calculateBollingerBands(closes, 20);
   if (bb) {
-    const bbPosition = (current.close - bb.lower) / (bb.upper - bb.lower);
+    const bbPosition = (current.close - bb.lowerBand) / ((bb.upperBand - bb.lowerBand) || 1e-9);
     if (bbPosition < 0.2) score += 1;
     else if (bbPosition > 0.8) score -= 1;
   }
