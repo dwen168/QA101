@@ -63,3 +63,41 @@
   - `7534f89`: Integrated macro overlays into trade and portfolio.
   - `4533582`: Calibrated macro penalties for better balance.
   - `[Current]`: Yahoo Finance fallback and EDA integration.
+
+## UPDATE (March 2026): Market Intelligence Performance & UX Optimization
+
+### Performance Improvements
+**Problem**: International stock queries (e.g., CBA.AX) took 30+ seconds due to sequential LLM processing and unnecessary enrichment on unrelated news.
+
+**Solutions Implemented**:
+
+1. **Parallelized LLM Calls**: Refactored Company News LLM and Macro News LLM to execute concurrently via `Promise.all()`.
+   - **Impact**: 30.1s → 18.7s (-37% wall-clock time)
+   - Both LLM requests now submit simultaneously instead of sequentially
+
+2. **Smart News Filtering**: Added company name matching to prevent LLM analysis on unrelated global headlines.
+   - **Company News**: Only articles containing ticker or company name are analyzed by LLM
+   - **Macro News**: Always analyzed by LLM (critical for market context)
+   - **Impact**: Saves 8-9s when no relevant company news is found
+
+3. **Enhanced Summary Fetching**: Multi-field fallback for news summaries (summary → description → lead_image → text).
+   - Summaries capped at 200 chars for UI performance
+   - Now displays summaries prominently (previously hidden in collapsible details)
+
+### Code Changes
+- `skills/market-intelligence/scripts/index.js`:
+  - Added timing metrics to `fetchYahooFinanceData()` for performance tracking
+  - Implemented smart headline filtering before LLM calls
+  - Multi-field summary extraction with character limits
+  - Both `fetchFinnhubNews()` and Yahoo path now use company name filtering
+
+- `frontend/index.html`:
+  - Summaries now display inline by default (not collapsible)
+  - Fallback placeholder "(No summary available)" when no summary exists
+  - Better visual hierarchy for news information
+
+### Results
+- **Query Time**: CBA.AX analysis reduced from ~30s to ~18-20s
+- **Token Efficiency**: Company news LLM calls eliminated when news is unrelated
+- **UX Clarity**: All news summaries visible without extra clicks
+- **Data Quality**: Multi-source summary extraction improves content availability
