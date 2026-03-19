@@ -75,13 +75,13 @@ function getMacroAdjustmentForTicker(marketData, macroRegime) {
   let adjustment = 0;
 
   if (macroRegime.riskLevel === 'HIGH') {
-    adjustment -= 6;
+    adjustment -= 3;
     reasons.push('High macro risk regime');
   } else if (macroRegime.riskLevel === 'MEDIUM') {
-    adjustment -= 2;
+    adjustment -= 1;
     reasons.push('Moderate macro uncertainty');
   } else if (macroRegime.riskLevel === 'LOW') {
-    adjustment += 1;
+    adjustment += 0.5;
     reasons.push('Supportive macro regime');
   }
 
@@ -97,12 +97,12 @@ function getMacroAdjustmentForTicker(marketData, macroRegime) {
   const overlap = (sectorThemeHints[sector] || []).filter((theme) => themes.includes(theme));
 
   if (macroRegime.riskLevel === 'HIGH' && overlap.length) {
-    adjustment -= 2;
+    adjustment -= 1;
     reasons.push(`Macro themes pressure ${sector} (${overlap.join(', ')})`);
   }
 
   if (sector === 'Energy' && themes.includes('ENERGY_COMMODITIES') && macroRegime.riskLevel !== 'LOW') {
-    adjustment += 2;
+    adjustment += 1;
     reasons.push('Energy may benefit from commodity-risk regime');
   }
 
@@ -448,10 +448,10 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   rankedData.sort((a, b) => b.adjustedComposite - a.adjustedComposite);
 
   const allocationScale = macroRegime.riskLevel === 'HIGH'
-    ? 0.75
+    ? 0.9
     : macroRegime.riskLevel === 'LOW'
-      ? 1.05
-      : 1.0;
+      ? 1.03
+      : 0.98;
   
   // Assign actions and allocations
   const rankedTickers = rankedData.map((data, rank) => {
