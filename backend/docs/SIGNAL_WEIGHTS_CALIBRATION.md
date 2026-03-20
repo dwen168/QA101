@@ -20,11 +20,11 @@ Original weights are based on intuition:
 ### The Solution
 **Statistical calibration** learns from data:
 1. Collect 500+ days of historical OHLCV data for 7-10 stocks
-2. Compute all 12 signals for each day
-3. Label each day: "Did price rise > 2% in next 5 days?" (1) or not (0)
-4. Train XGBoost classifier to predict forward 5-day returns
-5. Extract feature importances → these become signal weights
-6. Measure model accuracy (Accuracy, F1-score, AUC)
+2. Compute base + engineered features for each day
+3. Label each day by horizon target (5d/20d/60d thresholds)
+4. Train XGBoost with TimeSeriesSplit + class-imbalance handling
+5. Extract feature importances → map to runtime signal weights
+6. Measure model quality (Accuracy, F1-score, AUC, PR-AUC)
 
 ---
 
@@ -40,10 +40,19 @@ Use the matching `--output` path for each location to avoid accidental nested pa
 
 ### 1. Install Python Dependencies
 ```bash
-pip install xgboost scikit-learn pandas numpy requests
+pip install xgboost scikit-learn pandas numpy requests yfinance
 ```
 
-### 2. Set Your API Key
+### 2. Data Source Notes
+For ASX and non-US coverage, use Yahoo Finance first:
+
+```bash
+python backend/scripts/signal-calibration.py --source yahoo ...
+```
+
+Alpha Vantage is still available as fallback/override via `--source alpha`.
+
+### 3. Set Your API Key (only needed for Alpha mode)
 ```bash
 # Windows PowerShell
 $env:ALPHA_VANTAGE_API_KEY = "your_key_here"
@@ -54,7 +63,7 @@ ALPHA_VANTAGE_API_KEY=your_key_here
 
 Get a free API key: https://www.alphavantage.co
 
-### 3. Run Calibration
+### 4. Run Calibration
 ```bash
 cd backend
 
@@ -62,6 +71,17 @@ cd backend
 npm run calibrate-weights -- --symbols AAPL,MSFT,GOOGL,NVDA,TSLA,AMD,NFLX --days 500
 
 # Output: lib/signal-weights.json
+```
+
+ASX example (Yahoo + horizon-aware + time-series CV):
+```bash
+python backend/scripts/signal-calibration.py \
+  --source yahoo \
+  --symbols CBA.AX,WEB.AX,BHP.AX,TPW.AX,WBC.AX,CSL.AX \
+  --days 750 \
+  --horizons 5,20,60 \
+  --cv-splits 5 \
+  --output backend/lib/signal-weights.json
 ```
 
 Alternative (from repo root):
@@ -76,7 +96,7 @@ Path rule:
 - Running inside `backend`: use `--output lib/signal-weights.json`
 - Running from repo root: use `--output backend/lib/signal-weights.json`
 
-### 4. Verify
+### 5. Verify
 Check the generated `backend/lib/signal-weights.json`:
 ```json
 {
@@ -94,7 +114,7 @@ Check the generated `backend/lib/signal-weights.json`:
 }
 ```
 
-### 5. Test the API
+### 6. Test the API
 ```bash
 node server.js
 
@@ -130,32 +150,32 @@ For each symbol:
 
 ### Step 2: Label Creation
 For each day `t`:
-- Compute 5-day forward return: `r_future = (close[t+5] / close[t]) - 1`
-- Label: 1 if `r_future > 2%`, else 0
+- Compute horizon-specific forward return: `r_future = (close[t+h] / close[t]) - 1`
+- Label with horizon thresholds:
+  - SHORT (`h=5`): `r_future > 2%`
+  - MEDIUM (`h=20`): `r_future > 5%`
+  - LONG (`h=60`): `r_future > 8%`
 
 This creates a binary classification task:
-- **Positive class (1):** Stock rises ≥ 2% in next 5 days
+- **Positive class (1):** Stock rises above horizon threshold in next `h` days
 - **Negative class (0):** Stock flat or down
 
 ### Step 3: Model Training
 ```python
-model = xgb.XGBClassifier(
-  n_estimators=100,
-  max_depth=5,
-  learning_rate=0.1,
-  subsample=0.8
-)
-model.fit(X_train, y_train)
+for fold in TimeSeriesSplit(n_splits=5):
+  model = xgb.XGBClassifier(...)
+  model.fit(X_train, y_train)
 ```
 
-Training uses 80% of data; validation on 20%.
+Training uses **time-series cross-validation** (walk-forward), which avoids random leakage from future data.
 
-**Typical results (S&P 500 stocks):**
-- Accuracy: 58-65%
-- F1-score: 55-62%
-- AUC: 0.62-0.72
+**Typical results (single-digit day horizons are usually hard):**
+- Accuracy: 55-70%
+- F1-score: 0.10-0.35 (depends on class imbalance)
+- AUC: 0.50-0.60 (higher is better)
+- PR-AUC: compare against positive class ratio baseline
 
-These are realistic for 5-day prediction without additional features (volatility, sector, macro).
+For imbalanced targets, PR-AUC is often more informative than ROC-AUC.
 
 ### Step 4: Weight Extraction
 Each feature's importance score → normalized to signal weight:
@@ -180,6 +200,9 @@ momentum_strong_down: -1.45   (bearish when triggered)
 python backend/scripts/signal-calibration.py \
   --symbols AAPL,MSFT,GOOGL,NVDA,TSLA     # Stocks to calibrate on
   --days 500                                # Trading days of history
+  --source auto                             # auto|yahoo|alpha
+  --horizons 5,20,60                        # Forward-day horizons
+  --cv-splits 5                             # TimeSeriesSplit folds
   --output lib/signal-weights.json         # Where to save weights
   --api-key YOUR_KEY_HERE                  # Optional; uses env var if not provided
 ```
@@ -230,6 +253,7 @@ Required for data fetching. Get free tier: https://www.alphavantage.co (25 reque
 | **accuracy** | % of 5-day predictions correct |
 | **f1_score** | Harmonic mean of precision/recall |
 | **auc** | Area under ROC curve; 0.5 = random, 1.0 = perfect |
+| **pr_auc** | Precision-Recall AUC; better for imbalanced classes |
 | **signal_weights** | Updated weight for each signal (in points) |
 
 **Quality thresholds:**
@@ -253,8 +277,8 @@ python backend/scripts/signal-calibration.py \
 
 How pooled mode works:
 - Data from all symbols is combined into one dataset.
-- One model is trained on pooled samples.
-- One shared weight file is produced.
+- Horizon-specific models are trained with TimeSeriesSplit folds.
+- One blended runtime weight file is produced, plus horizon-specific weight sections.
 
 When pooled mode is best:
 - You want one general weight set for many stocks.

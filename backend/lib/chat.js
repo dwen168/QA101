@@ -41,7 +41,7 @@ Routing rules:
 - Non-stock/general chat: action = null.
 - Stock analysis intent or ticker-only request: action = "ANALYZE_STOCK", set ticker, skillSequence = ["market-intelligence", "eda-visual-analysis", "trade-recommendation"].
 - Portfolio optimization intent: action = "OPTIMIZE_PORTFOLIO", set tickers array (>= 2), skillSequence = ["portfolio-optimization"].
-- Backtest intent: action = "RUN_BACKTEST", set ticker, startDate, endDate, strategyName, skillSequence = ["backtesting"].
+- Backtest intent: action = "RUN_BACKTEST", set ticker, startDate, endDate, strategyName, timeHorizon, skillSequence = ["backtesting"].
 
 Output safety rules:
 - If uncertain, prefer action = null instead of guessing.
@@ -67,8 +67,8 @@ If a field is unknown, set it to null. Keep message concise and professional.`;
   } catch {
     const parseTimeHorizon = (raw) => {
       const lower = String(raw || '').toLowerCase();
-      if (/short|swing|day trade|intraday|near term|near-term/.test(lower)) return 'SHORT';
-      if (/long|long term|long-term|invest|retirement/.test(lower)) return 'LONG';
+      if (/short|swing|day trade|intraday|near term|near-term|短线|短期|波段|8周|八周|两个月内/.test(lower)) return 'SHORT';
+      if (/long|long term|long-term|invest|retirement|中长线|长线|长期|基本面|价值|半年|一年|长期持有/.test(lower)) return 'LONG';
       return 'MEDIUM';
     };
 
@@ -128,12 +128,13 @@ If a field is unknown, set it to null. Keep message concise and professional.`;
       if (tickers.length >= 1) {
         const { startDate, endDate } = parseDateRange(msg);
         const strategyName = parseBacktestStrategy(msg);
+        const timeHorizon = parseTimeHorizon(msg);
         return {
-          message: `I will backtest ${tickers[0]} using ${strategyName} from ${startDate} to ${endDate}.`,
+          message: `I will backtest ${tickers[0]} using ${strategyName} from ${startDate} to ${endDate} for ${timeHorizon.toLowerCase()} horizon.`,
           action: 'RUN_BACKTEST',
           ticker: tickers[0],
           tickers: null,
-          timeHorizon: null,
+          timeHorizon,
           startDate,
           endDate,
           strategyName,
@@ -168,7 +169,7 @@ If a field is unknown, set it to null. Keep message concise and professional.`;
         action: 'ANALYZE_STOCK',
         ticker: ticker,
         tickers: null,
-        timeHorizon: null,
+        timeHorizon: parseTimeHorizon(msg),
         startDate: null,
         endDate: null,
         strategyName: null,

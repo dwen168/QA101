@@ -26,6 +26,43 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
+function normalizeTimeHorizon(value = 'MEDIUM') {
+  const normalized = String(value || '').trim().toUpperCase();
+  return ['SHORT', 'MEDIUM', 'LONG'].includes(normalized) ? normalized : 'MEDIUM';
+}
+
+function getBacktestProfile(timeHorizon = 'MEDIUM') {
+  const normalized = normalizeTimeHorizon(timeHorizon);
+  const profiles = {
+    SHORT: {
+      timeHorizon: 'SHORT',
+      label: 'Short-term tactical',
+      holdingPeriod: 'Up to 8 weeks',
+      stopLossPct: 0.02,
+      takeProfitPct: 0.05,
+      maxHoldingDays: 40,
+    },
+    MEDIUM: {
+      timeHorizon: 'MEDIUM',
+      label: 'Medium-term balanced',
+      holdingPeriod: '2 to 6 months',
+      stopLossPct: 0.03,
+      takeProfitPct: 0.07,
+      maxHoldingDays: 120,
+    },
+    LONG: {
+      timeHorizon: 'LONG',
+      label: 'Long-term trend/fundamental',
+      holdingPeriod: '6+ months',
+      stopLossPct: 0.08,
+      takeProfitPct: 0.2,
+      maxHoldingDays: 252,
+    },
+  };
+
+  return profiles[normalized];
+}
+
 // Singleton Yahoo Finance instance (resolved from backend/node_modules)
 let _yf = null;
 function getYahooFinance() {
@@ -179,6 +216,14 @@ function getRequiredWarmupBars(signalType) {
   return 200;
 }
 
+function getMinimumTradingDays(signalType, timeHorizon = 'MEDIUM') {
+  const base = signalType === 'trade-recommendation' ? 30 : 20;
+  const normalized = normalizeTimeHorizon(timeHorizon);
+  if (normalized === 'LONG') return Math.max(base, 120);
+  if (normalized === 'MEDIUM') return Math.max(base, 40);
+  return Math.max(base, 20);
+}
+
 // Generate trading signals (simplified trade-recommendation scoring)
 function generateSignal(priceData, index, signalType = 'trade-recommendation') {
   const warmupBars = getRequiredWarmupBars(signalType);
@@ -272,7 +317,7 @@ function calculateRSI(closes, period = 14) {
 }
 
 // Simulate trading
-function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 0) {
+function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 0, profile = getBacktestProfile('MEDIUM')) {
   const trades = [];
   const equityCurve = [];
 
@@ -292,17 +337,25 @@ function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 
       const entryPrice = position.entryPrice;
       const currentPrice = current.close;
       const pnlPercent = (currentPrice - entryPrice) / entryPrice;
+      const holdingDays = Math.max(1, Math.floor((current.date - position.entryDate) / (1000 * 60 * 60 * 24)));
 
-      // Stop-loss: -3%
-      if (pnlPercent < -0.03) {
+      // Stop-loss threshold depends on time horizon profile.
+      if (pnlPercent < -safeNumber(profile.stopLossPct, 0.03)) {
         const closedTrade = closeTrade(position, current, 'STOP_LOSS');
         action = 'SELL';
         actionMeta = { tradeId: closedTrade.tradeId, pnl: closedTrade.pnlDollars, reason: closedTrade.reason };
         exitedThisBar = true;
       }
-      // Take-profit: +7%
-      else if (pnlPercent > 0.07) {
+      // Take-profit threshold depends on time horizon profile.
+      else if (pnlPercent > safeNumber(profile.takeProfitPct, 0.07)) {
         const closedTrade = closeTrade(position, current, 'TAKE_PROFIT');
+        action = 'SELL';
+        actionMeta = { tradeId: closedTrade.tradeId, pnl: closedTrade.pnlDollars, reason: closedTrade.reason };
+        exitedThisBar = true;
+      }
+      // Optional max holding period discipline.
+      else if (safeNumber(profile.maxHoldingDays, 0) > 0 && holdingDays >= profile.maxHoldingDays) {
+        const closedTrade = closeTrade(position, current, 'MAX_HOLDING_PERIOD');
         action = 'SELL';
         actionMeta = { tradeId: closedTrade.tradeId, pnl: closedTrade.pnlDollars, reason: closedTrade.reason };
         exitedThisBar = true;
@@ -507,7 +560,15 @@ function computeMetrics(trades, equityCurve, initialCapital, finalCapital, days)
 
 // Main backtest function
 async function runBacktest(params, dependencies = {}) {
-  const { ticker, strategyName = 'trade-recommendation', startDate, endDate, initialCapital = 100000, apiKey } = params;
+  const {
+    ticker,
+    strategyName = 'trade-recommendation',
+    startDate,
+    endDate,
+    initialCapital = 100000,
+    apiKey,
+    timeHorizon = 'MEDIUM',
+  } = params;
   
   if (!ticker || !startDate || !endDate) {
     throw new Error('Missing required parameters: ticker, startDate, endDate');
@@ -518,12 +579,17 @@ async function runBacktest(params, dependencies = {}) {
     throw new Error(`Unsupported strategyName: ${strategyName}. Use trade-recommendation, macd-bb, or rsi-ma`);
   }
 
+  const profile = getBacktestProfile(timeHorizon);
+
   // Fetch historical data (Alpha Vantage first, then Yahoo fallback)
   const historical = await fetchHistoricalData(ticker, apiKey);
   const priceData = historical.data;
-  if (!priceData || priceData.length < 50) {
+  const requiredWarmupBars = getRequiredWarmupBars(strategyName);
+  const minimumTradingDays = getMinimumTradingDays(strategyName, profile.timeHorizon);
+
+  if (!priceData || priceData.length < Math.max(20, minimumTradingDays)) {
     return {
-      error: 'Insufficient historical data. Need at least 50 trading days.',
+      error: `Insufficient historical data. Need at least ${Math.max(20, minimumTradingDays)} trading days.`,
       dataSource: historical.source,
       skillUsed: 'backtesting',
     };
@@ -536,13 +602,17 @@ async function runBacktest(params, dependencies = {}) {
     throw new Error('Invalid date range. Use YYYY-MM-DD and ensure startDate <= endDate');
   }
 
-  const requiredWarmupBars = getRequiredWarmupBars(strategyName);
   const rangeStartIndex = priceData.findIndex((p) => p.date >= start);
   const rangeEndIndex = priceData.findLastIndex((p) => p.date <= end);
 
   if (rangeStartIndex === -1 || rangeEndIndex === -1 || rangeStartIndex > rangeEndIndex) {
+    const availableStartDate = priceData[0]?.date?.toISOString?.().split('T')[0] || null;
+    const availableEndDate = priceData[priceData.length - 1]?.date?.toISOString?.().split('T')[0] || null;
     return {
       error: `No historical data available in date range [${startDate}, ${endDate}]`,
+      availableRange: availableStartDate && availableEndDate
+        ? { startDate: availableStartDate, endDate: availableEndDate }
+        : null,
       skillUsed: 'backtesting',
     };
   }
@@ -551,19 +621,31 @@ async function runBacktest(params, dependencies = {}) {
   const simulationData = priceData.slice(simulationStartIndex, rangeEndIndex + 1);
   const tradingStartOffset = rangeStartIndex - simulationStartIndex;
   const filteredData = simulationData.slice(tradingStartOffset);
+  const warnings = [];
+
+  if (simulationStartIndex === 0 && rangeStartIndex < requiredWarmupBars) {
+    warnings.push(`Limited warmup history before ${startDate}; early signals may be less stable for ${strategyName}.`);
+  }
   
-  if (filteredData.length < 50) {
+  if (filteredData.length < minimumTradingDays) {
     return {
-      error: `Insufficient data in date range [${startDate}, ${endDate}]. Got ${filteredData.length} days.`,
+      error: `Insufficient data in date range [${startDate}, ${endDate}]. Got ${filteredData.length} days, need at least ${minimumTradingDays} days for ${strategyName}.`,
       skillUsed: 'backtesting',
     };
+  }
+
+  if (filteredData.length < 50) {
+    warnings.push(`Sample size is only ${filteredData.length} trading days; metrics may be noisy.`);
+  }
+  if (profile.timeHorizon === 'LONG' && filteredData.length < 180) {
+    warnings.push('Long-horizon backtest has less than 180 trading days; long-term metrics may be unstable.');
   }
   
   // Generate signals
   const signals = simulationData.map((p, i) => generateSignal(simulationData, i, strategyName));
   
   // Simulate trades
-  const { trades, capital: finalCapital, equityCurve } = simulateTrades(simulationData, signals, initialCapital, tradingStartOffset);
+  const { trades, capital: finalCapital, equityCurve } = simulateTrades(simulationData, signals, initialCapital, tradingStartOffset, profile);
   
   // Compute metrics
   const days = filteredData.length;
@@ -605,11 +687,20 @@ async function runBacktest(params, dependencies = {}) {
   if (metrics.totalTrades < 20) {
     recommendations.push('⚠️ Less than 20 trades - increase sample size for statistical significance');
   }
+  recommendations.push(`ℹ️ Horizon profile: ${profile.label} (${profile.holdingPeriod}) · SL ${Math.round(profile.stopLossPct * 100)}% · TP ${Math.round(profile.takeProfitPct * 100)}% · Max hold ${profile.maxHoldingDays} days`);
   
   return {
     backtestReport: {
       ticker,
       strategyName,
+      timeHorizon: profile.timeHorizon,
+      horizonProfile: {
+        label: profile.label,
+        holdingPeriod: profile.holdingPeriod,
+        stopLossPercent: Math.round(profile.stopLossPct * 100),
+        takeProfitPercent: Math.round(profile.takeProfitPct * 100),
+        maxHoldingDays: profile.maxHoldingDays,
+      },
       period: {
         startDate,
         endDate,
@@ -643,6 +734,7 @@ async function runBacktest(params, dependencies = {}) {
           : null,
       },
       recommendations,
+      warnings,
       dataSource: historical.source,
     },
     dataSource: historical.source,
@@ -651,5 +743,7 @@ async function runBacktest(params, dependencies = {}) {
 }
 
 module.exports = {
+  normalizeTimeHorizon,
+  getBacktestProfile,
   runBacktest,
 };

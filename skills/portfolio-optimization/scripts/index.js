@@ -14,6 +14,64 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function mapWithConcurrency(items, mapper, { concurrency = 4, delayMs = 0 } = {}) {
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) break;
+
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
+
+      try {
+        results[index] = await mapper(items[index], index);
+      } catch (error) {
+        results[index] = { error };
+      }
+    }
+  };
+
+  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+function computeLogReturnsFromHistory(priceHistory = []) {
+  const closes = priceHistory.map((d) => safeNumber(d.close)).filter((value) => value > 0);
+  if (closes.length < 2) return [];
+  const returns = [];
+  for (let i = 1; i < closes.length; i += 1) {
+    returns.push(Math.log(closes[i] / closes[i - 1]));
+  }
+  return returns;
+}
+
+function computeStd(values = []) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+  return Math.sqrt(Math.max(0, variance));
+}
+
+function buildDerivedMarketMetrics(marketDataArray = []) {
+  const logReturns = marketDataArray.map((md) => computeLogReturnsFromHistory(md.priceHistory));
+  const volatilities = logReturns.map((returns) => computeStd(returns));
+  const positiveVols = volatilities.filter((value) => value > 0);
+  const minVol = positiveVols.length > 0 ? Math.min(...positiveVols) : 0;
+  const maxVol = volatilities.length > 0 ? Math.max(...volatilities) : 0;
+  return {
+    logReturns,
+    volatilities,
+    minVol,
+    maxVol,
+  };
+}
+
 function summarizeDataSources(marketDataArray) {
   const sourceBreakdown = {
     live: 0,
@@ -232,28 +290,14 @@ function computeQualityScore(marketData) {
 }
 
 // Compute risk-adjusted score for a single stock (0-100)
-function computeRiskAdjustedScore(marketData, allMarketData) {
+function computeRiskAdjustedScore(marketData, volatilityContext) {
   const { rsi } = marketData;
-  
-  // Calculate volatility percentile relative to universe
-  const volatilities = allMarketData.map(m => {
-    const closes = m.priceHistory.map(d => d.close);
-    if (closes.length < 2) return 0;
-    const returns = [];
-    for (let i = 1; i < closes.length; i++) {
-      returns.push(Math.log(closes[i] / closes[i - 1]));
-    }
-    const mean = returns.reduce((a, b) => a + b) / returns.length;
-    const variance = returns.reduce((a, b) => a + (b - mean) ** 2) / returns.length;
-    return Math.sqrt(variance);
-  });
-  
-  const minVol = Math.min(...volatilities.filter(v => v > 0));
-  const maxVol = Math.max(...volatilities);
-  const currentVol = volatilities[allMarketData.indexOf(marketData)];
+
+  const { volatilities = [], minVol = 0, maxVol = 0, index = -1 } = volatilityContext || {};
+  const currentVol = index >= 0 ? safeNumber(volatilities[index], 0) : 0;
   
   let riskScore = 100;
-  if (maxVol > minVol) {
+  if (maxVol > minVol && currentVol > 0) {
     const volPercentile = ((currentVol - minVol) / (maxVol - minVol)) * 100;
     riskScore = 100 - volPercentile;
   }
@@ -271,10 +315,13 @@ function computeRiskAdjustedScore(marketData, allMarketData) {
 }
 
 // Compute composite multi-factor score
-function computeCompositeScore(marketData, allMarketData, timeHorizon = 'MEDIUM') {
+function computeCompositeScore(marketData, allMarketData, timeHorizon = 'MEDIUM', derivedMetrics = null, index = -1) {
   const momentumScore = computeMomentumScore(marketData);
   const qualityScore = computeQualityScore(marketData);
-  const riskAdjustedScore = computeRiskAdjustedScore(marketData, allMarketData);
+  const riskAdjustedScore = computeRiskAdjustedScore(marketData, {
+    ...(derivedMetrics || {}),
+    index,
+  });
   
   // Weights based on time horizon
   let weights = { momentum: 0.30, quality: 0.40, risk: 0.30 }; // MEDIUM
@@ -298,20 +345,15 @@ function computeCompositeScore(marketData, allMarketData, timeHorizon = 'MEDIUM'
 }
 
 // Compute correlation matrix from price histories
-function computeCorrelationMatrix(marketDataArray) {
+function computeCorrelationMatrix(marketDataArray, precomputedLogReturns = null) {
   const n = marketDataArray.length;
   const matrix = Array(n).fill(null).map(() => Array(n).fill(0));
   const tickers = marketDataArray.map(m => m.ticker);
   
   // Get log returns for each stock
-  const logReturns = marketDataArray.map(md => {
-    const closes = md.priceHistory.map(d => d.close);
-    const returns = [];
-    for (let i = 1; i < closes.length; i++) {
-      returns.push(Math.log(closes[i] / closes[i - 1]));
-    }
-    return returns;
-  });
+  const logReturns = Array.isArray(precomputedLogReturns) && precomputedLogReturns.length === n
+    ? precomputedLogReturns
+    : marketDataArray.map((md) => computeLogReturnsFromHistory(md.priceHistory));
   
   // Compute pairwise correlations
   for (let i = 0; i < n; i++) {
@@ -515,22 +557,26 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   if (useMarketData && Array.isArray(useMarketData) && useMarketData.length === tickers.length) {
     marketDataArray = useMarketData;
   } else {
-    // Fetch market data for each ticker sequentially to avoid Alpha Vantage free-tier burst limits.
+    // Fetch market data with controlled concurrency to reduce end-to-end latency.
     try {
-      const shouldThrottleAlpha = !!config.alphaVantageApiKey && config.alphaVantageApiKey !== 'demo';
-      for (let index = 0; index < tickers.length; index += 1) {
-        const ticker = tickers[index];
-        try {
-          const result = await runMarketIntelligence({ ticker });
-          if (result?.marketData) {
-            marketDataArray.push(result.marketData);
-          }
-        } catch (error) {
-          console.error(`Failed to fetch market data for ${ticker}:`, error.message);
-        }
+      const hasFinnhub = !!config.finnhubApiKey;
+      const shouldThrottle = !hasFinnhub && !!config.alphaVantageApiKey && config.alphaVantageApiKey !== 'demo';
+      const concurrency = shouldThrottle ? 2 : 4;
+      const perRequestDelayMs = shouldThrottle ? 200 : 0;
 
-        if (shouldThrottleAlpha && index < tickers.length - 1) {
-          await sleep(1100);
+      const settled = await mapWithConcurrency(tickers, async (ticker) => {
+        const result = await runMarketIntelligence({ ticker }, dependencies);
+        return result?.marketData || null;
+      }, { concurrency, delayMs: perRequestDelayMs });
+
+      for (let index = 0; index < settled.length; index += 1) {
+        const item = settled[index];
+        if (item?.error) {
+          console.error(`Failed to fetch market data for ${tickers[index]}:`, item.error.message);
+          continue;
+        }
+        if (item) {
+          marketDataArray.push(item);
         }
       }
     } catch (error) {
@@ -545,9 +591,10 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   const dataSources = summarizeDataSources(marketDataArray);
 
   const macroRegime = computeMacroRegime(marketDataArray);
+  const derivedMetrics = buildDerivedMarketMetrics(marketDataArray);
   
   // Compute factor scores
-  const scores = marketDataArray.map(md => computeCompositeScore(md, marketDataArray, timeHorizon));
+  const scores = marketDataArray.map((md, idx) => computeCompositeScore(md, marketDataArray, timeHorizon, derivedMetrics, idx));
   
   // Create ranked list
   const rankedData = marketDataArray.map((md, idx) => {
@@ -598,7 +645,7 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   });
   
   // Compute correlation matrix
-  const correlationMatrix = computeCorrelationMatrix(marketDataArray);
+  const correlationMatrix = computeCorrelationMatrix(marketDataArray, derivedMetrics.logReturns);
   
   // Group by sector
   const sectorAnalysis = groupBySector(marketDataArray, scores);

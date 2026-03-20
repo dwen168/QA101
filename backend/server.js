@@ -61,6 +61,7 @@ app.post('/api/skills/trade-recommendation', async (req, res) => {
     const result = await runTradeRecommendation({
       marketData: req.body.marketData,
       edaInsights: req.body.edaInsights,
+      timeHorizon: req.body.timeHorizon || 'MEDIUM',
     });
     res.json(result);
   } catch (error) {
@@ -86,6 +87,7 @@ app.post('/api/skills/backtesting', async (req, res) => {
     const result = await runBacktest({
       ticker: req.body.ticker,
       strategyName: req.body.strategyName || 'trade-recommendation',
+      timeHorizon: req.body.timeHorizon || 'MEDIUM',
       startDate: req.body.startDate,
       endDate: req.body.endDate,
       initialCapital: req.body.initialCapital || 100000,

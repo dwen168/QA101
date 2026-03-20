@@ -151,14 +151,23 @@ function summarizeThemeImpact(theme, sector, ticker) {
 const POSITIVE_NEWS_KEYWORDS = [
   'beats', 'beat', 'surge', 'rally', 'gain', 'gains', 'upgrade', 'upgraded', 'strong', 'record', 'growth',
   'breakthrough', 'profit', 'profits', 'bullish', 'optimistic', 'recover', 'recovery', 'rebound', 'outperform',
-  'approval', 'expansion', 'tailwind', 'improves', 'improvement', 'cut rates', 'rate cut', 'easing'
+  'approval', 'expansion', 'tailwind', 'improves', 'improvement', 'cut rates', 'rate cut', 'easing',
+  // ASX / biotech / resources
+  'phase 3', 'phase iii', 'fda approval', 'tga approval', 'positive data', 'positive results', 'efficacy',
+  'clinical success', 'milestone', 'contract win', 'offtake', 'maiden', 'resource upgrade', 'reserve upgrade',
+  'high grade', 'significant intercept', 'production beat', 'dividend', 'buyback', 'capital return',
+  'merger', 'acquisition', 'takeover bid', 'strategic review', 'placement completed', 'oversubscribed',
 ];
 
 const NEGATIVE_NEWS_KEYWORDS = [
   'miss', 'misses', 'plunge', 'drop', 'falls', 'fall', 'downgrade', 'downgraded', 'weak', 'loss', 'losses',
   'bearish', 'risk-off', 'selloff', 'recession', 'inflation', 'war', 'conflict', 'sanction', 'tariff',
   'lawsuit', 'probe', 'investigation', 'default', 'stress', 'volatility', 'headwind', 'cuts outlook',
-  'delay', 'delays', 'layoff', 'layoffs', 'hawkish', 'rate hike', 'higher for longer'
+  'delay', 'delays', 'layoff', 'layoffs', 'hawkish', 'rate hike', 'higher for longer',
+  // ASX / biotech / resources
+  'trial failure', 'failed trial', 'rejected', 'clinical hold', 'safety concern', 'adverse event',
+  'production miss', 'grade decline', 'impairment', 'write-down', 'write-off', 'capital raise', 'dilution',
+  'trading halt', 'suspension', 'winding up', 'administration', 'receivership', 'shortfall',
 ];
 
 function scoreHeadlineSentimentFallback(headline) {
@@ -446,6 +455,180 @@ async function fetchFinnhubMacroNews() {
   }
 }
 
+// Fetch ASX company announcements (price-sensitive and general) from the ASX public API
+async function fetchAsxAnnouncements(ticker) {
+  try {
+    const code = ticker.split('.')[0].toUpperCase();
+    const url = `https://www.asx.com.au/asx/1/company/${encodeURIComponent(code)}/announcements?count=10&market_sensitive=false`;
+    const response = await fetch(url, {
+      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0' },
+    });
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    const items = Array.isArray(data?.data) ? data.data : [];
+    if (items.length === 0) return [];
+
+    const headlines = items.slice(0, 8).map((item) => item.header || '');
+    const scores = scoreSentimentsWithRules(headlines);
+
+    return items.slice(0, 8).map((item, i) => {
+      const releasedAt = item.document_release_date ? Date.parse(item.document_release_date) : 0;
+      const hoursAgo = releasedAt > 0 ? Math.max(0, Math.round((Date.now() - releasedAt) / 3600000)) : 0;
+      const isSensitive = item.price_sensitive === true || String(item.market_sensitive || '').toLowerCase() === 'true';
+      return {
+        title: item.header || '(ASX Announcement)',
+        summary: isSensitive ? '[Price-sensitive announcement]' : '',
+        url: item.url ? `https://www.asx.com.au${item.url}` : '',
+        source: 'ASX Announcements',
+        sentiment: scores[i] ?? 0,
+        hoursAgo,
+      };
+    });
+  } catch (error) {
+    console.error('ASX announcements fetch failed:', error.message);
+    return [];
+  }
+}
+
+// Fetch news from Google News RSS — covers AU media (AFR, SMH, The Australian) for ASX stocks
+async function fetchGoogleNewsRss(ticker, companyName) {
+  try {
+    const code = ticker.split('.')[0].toUpperCase();
+    const queryStr = companyName && companyName !== ticker
+      ? `${code} OR "${companyName.split(' ').slice(0, 3).join(' ')}" ASX`
+      : `${code} ASX`;
+    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(queryStr)}&hl=en-AU&gl=AU&ceid=AU:en`;
+    const response = await fetch(url, {
+      headers: { Accept: 'application/rss+xml, application/xml, text/xml', 'User-Agent': 'Mozilla/5.0' },
+    });
+    if (!response.ok) return [];
+
+    const xml = await response.text();
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    const titleRegex = /<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/;
+    const pubDateRegex = /<pubDate>(.*?)<\/pubDate>/;
+    const linkRegex = /<link[^>]*>(.*?)<\/link>/;
+
+    const items = [];
+    let match;
+    while ((match = itemRegex.exec(xml)) !== null && items.length < 6) {
+      const block = match[1];
+      const title = (titleRegex.exec(block)?.[1] || '')
+        .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+      const pubDate = pubDateRegex.exec(block)?.[1]?.trim() || '';
+      const link = linkRegex.exec(block)?.[1]?.trim() || '';
+      if (!title) continue;
+      const publishMs = pubDate ? Date.parse(pubDate) : 0;
+      const hoursAgo = publishMs > 0 ? Math.max(0, Math.round((Date.now() - publishMs) / 3600000)) : 0;
+      items.push({ title, link, hoursAgo });
+    }
+
+    if (items.length === 0) return [];
+
+    const scores = scoreSentimentsWithRules(items.map((item) => item.title));
+    return items.map((item, i) => ({
+      title: item.title,
+      summary: '',
+      url: item.link,
+      source: 'Google News',
+      sentiment: scores[i] ?? 0,
+      hoursAgo: item.hoursAgo,
+    }));
+  } catch (error) {
+    console.error('Google News RSS fetch failed:', error.message);
+    return [];
+  }
+}
+
+// Generate mock ASIC short data for resilience when real data is unavailable
+function generateMockShortData(ticker) {
+  const code = ticker.split('.')[0].toUpperCase();
+  // Simulate realistic short interest distribution: most stocks 0-3%, small percentage >5%
+  const rand = Math.random();
+  const shortPercent = rand < 0.75
+    ? parseFloat((Math.random() * 3).toFixed(1)) // 75% chance: 0-3%
+    : parseFloat((3 + Math.random() * 7).toFixed(1)); // 25% chance: 3-10%
+  
+  return {
+    shortPercent,
+    shortTurnover: Math.floor(Math.random() * 5000000 + 100000),
+    dataSource: 'Mock (ASIC unavailable)',
+    available: true,
+    isMock: true,
+  };
+}
+
+// Fetch ASIC short selling data — weekly ASX report
+// Data from https://asic.gov.au/regulatory-resources/markets/short-selling-ban-data
+async function fetchAsicShortSellingData(ticker) {
+  try {
+    const code = ticker.split('.')[0].toUpperCase();
+
+    const parseShortmanCurrentPosition = (html) => {
+      const tableMatch = String(html || '').match(/<table[^>]*id=["']positionInfo["'][^>]*>[\s\S]*?<\/table>/i);
+      const tableHtml = tableMatch ? tableMatch[0] : String(html || '');
+      const compact = tableHtml.replace(/\s+/g, ' ');
+
+      // Preferred: find "Current position" row then read the following value cell.
+      const contextualMatch = compact.match(
+        /Current\s*position[\s\S]*?<\/tr>\s*<tr[^>]*>[\s\S]*?<td[^>]*class=["'][^"']*\bca\b[^"']*["'][^>]*>\s*([0-9]+(?:\.[0-9]+)?)%/i
+      );
+      if (contextualMatch && contextualMatch[1]) {
+        return safeNumber(contextualMatch[1], NaN);
+      }
+
+      // Fallback: first percentage in position table value cell.
+      const genericMatch = compact.match(/<td[^>]*class=["'][^"']*\bca\b[^"']*["'][^>]*>\s*([0-9]+(?:\.[0-9]+)?)%/i);
+      if (genericMatch && genericMatch[1]) {
+        return safeNumber(genericMatch[1], NaN);
+      }
+      return NaN;
+    };
+    
+    // Primary source: shortman.com.au (aggregates ASIC data with better UX)
+    try {
+      const shortmanUrl = `https://www.shortman.com.au/stock?q=${code.toLowerCase()}`;
+      const shortmanResponse = await fetch(shortmanUrl, { 
+        headers: { 'User-Agent': 'Mozilla/5.0' },
+        timeout: ENRICHMENT_TIMEOUT_MS 
+      });
+      
+      if (shortmanResponse.ok) {
+        const html = await shortmanResponse.text();
+        const shortPercent = parseShortmanCurrentPosition(html);
+        if (Number.isFinite(shortPercent) && shortPercent >= 0) {
+          return {
+            shortPercent: parseFloat(shortPercent.toFixed(2)),
+            shortTurnover: 0,
+            dataSource: 'ShortMan (ASIC aggregated)',
+            available: true,
+          };
+        }
+      }
+    } catch (shortmanError) {
+      console.warn(`ShortMan fetch failed for ${code}, using mock short data:`, shortmanError.message);
+    }
+
+    // Fallback: return mock short data (2%)
+    return {
+      shortPercent: 2.0,
+      shortTurnover: 0,
+      dataSource: 'Mock (ShortMan unavailable)',
+      isMock: true,
+    };
+  } catch (error) {
+    console.error('Short data fetch failed:', error.message);
+    // Final fallback in case of unexpected error
+    return {
+      shortPercent: 2.0,
+      shortTurnover: 0,
+      dataSource: 'Mock (Error)',
+      isMock: true,
+    };
+  }
+}
+
 async function fetchNewsApiMacroNews() {
   const apiKey = config.newsApiKey;
   if (!apiKey) return [];
@@ -602,7 +785,7 @@ async function fetchFinnhubCandles(ticker) {
 
   try {
     const to = Math.floor(Date.now() / 1000);
-    const from = to - (220 * 24 * 3600);
+    const from = to - (730 * 24 * 3600);  // 2 years of daily data
     const url = `https://finnhub.io/api/v1/stock/candle?symbol=${encodeURIComponent(ticker)}&resolution=D&from=${from}&to=${to}&token=${apiKey}`;
     const response = await fetch(url);
     if (!response.ok) return null;
@@ -878,7 +1061,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
 
   const yf = getYahooFinance();
   const to = new Date();
-  const from = new Date(Date.now() - 120 * 24 * 3600 * 1000);
+  const from = new Date(Date.now() - 730 * 24 * 3600 * 1000);
 
   const startApi = Date.now();
   const [chart, summary] = await Promise.all([
@@ -950,25 +1133,44 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   // News from Finnhub is US-focused; for non-US tickers use Yahoo Finance search news fallback
   const startNews = Date.now();
   
-  // parallelize company news LLM and macro news LLM
-  const [yahooNews, macroNews] = await Promise.all([
+  // Check if ASX ticker early (needed for both news and short data fetches)
+  const isAsx = ticker.toUpperCase().endsWith('.AX');
+  
+  // parallelize company news, macro news, and ASX short metrics
+  const [yahooNews, macroNews, shortMetrics] = await Promise.all([
     (async () => {
       try {
+        const companyName = priceMod.longName || priceMod.shortName || ticker;
+
         const startYahooNews = Date.now();
-        const results = await withTimeout(
-          yf.search(ticker, { newsCount: 5, quotesCount: 0 }),
-          ENRICHMENT_TIMEOUT_MS,
-          `Yahoo news search for ${ticker}`
-        );
+        // For ASX tickers, fetch Yahoo News + ASX Announcements + Google News RSS in parallel
+        const [yahooSearchResult, asxResult, googleRssResult] = await Promise.allSettled([
+          withTimeout(
+            yf.search(ticker, { newsCount: 5, quotesCount: 0 }),
+            ENRICHMENT_TIMEOUT_MS,
+            `Yahoo news search for ${ticker}`
+          ),
+          isAsx
+            ? withTimeout(fetchAsxAnnouncements(ticker), ENRICHMENT_TIMEOUT_MS, `ASX announcements for ${ticker}`)
+            : Promise.resolve([]),
+          isAsx
+            ? withTimeout(fetchGoogleNewsRss(ticker, companyName), ENRICHMENT_TIMEOUT_MS, `Google News RSS for ${ticker}`)
+            : Promise.resolve([]),
+        ]);
         perfMs.yahooNewsSearch = Date.now() - startYahooNews;
 
-        const items = (results.news || []).slice(0, 5);
-        const headlines = items.map((n) => n.title || '');
-        const scores = scoreSentimentsWithRules(headlines);
-        const ruleScoredNews = items.map((n, i) => ({
+        const yahooItems = yahooSearchResult.status === 'fulfilled'
+          ? (yahooSearchResult.value?.news || []).slice(0, 5)
+          : [];
+        const asxItems = asxResult.status === 'fulfilled' ? (asxResult.value || []) : [];
+        const googleItems = googleRssResult.status === 'fulfilled' ? (googleRssResult.value || []) : [];
+
+        const yahooScores = scoreSentimentsWithRules(yahooItems.map((n) => n.title || ''));
+        const ruleScoredYahoo = yahooItems.map((n, i) => ({
           title: n.title || '',
-        summary: (n.summary || n.description || '').substring(0, 200), // Cap at 200 chars
-          sentiment: scores[i] ?? 0,
+          summary: (n.summary || n.description || '').substring(0, 200),
+          sentiment: yahooScores[i] ?? 0,
+          source: 'Yahoo Finance',
           hoursAgo: (() => {
             const ts = n.providerPublishTime;
             if (!ts) return 0;
@@ -988,29 +1190,32 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
           })(),
         }));
 
-        // For international tickers, only send to LLM if news mentions ticker or company name
-        const companyName = priceMod.longName || priceMod.shortName || ticker;
+        // Merge and deduplicate across all sources (Yahoo + ASX Announcements + Google News)
+        const allNews = dedupeArticlesByTitle([...ruleScoredYahoo, ...asxItems, ...googleItems]);
+
+        // For LLM scoring, prefer articles that explicitly mention the ticker/company
         const searchTerms = [
           ticker.toUpperCase(),
-          ticker.split('.')[0].toUpperCase(), // Base ticker without exchange code
-          ...(companyName.split(' ').slice(0, 3)), // First 3 words of company name
+          ticker.split('.')[0].toUpperCase(),
+          ...(companyName.split(' ').slice(0, 3)),
         ];
-        const relevantNews = ruleScoredNews.filter((news) => {
+        const relevantNews = allNews.filter((news) => {
           const headline = (news.title || '').toUpperCase();
-          return searchTerms.some((term) => headline.includes(term.toUpperCase()));
+          return searchTerms.some((term) => term.length > 1 && headline.includes(term.toUpperCase()));
         });
 
         const startCompanyLlm = Date.now();
-        let result = ruleScoredNews;
-        if (relevantNews.length > 0) {
-          // Only score relevant company news with LLM
-          const llmScored = await scoreCompanyNewsWithLlm(relevantNews, {
+        // Fall back to all articles for LLM if no article explicitly names the company
+        // (common for ASX small-caps in third-party news)
+        const llmCandidates = relevantNews.length > 0 ? relevantNews : allNews.slice(0, 6);
+        let result = allNews;
+        if (llmCandidates.length > 0) {
+          const llmScored = await scoreCompanyNewsWithLlm(llmCandidates, {
             ticker,
             sector: sp.sector || sp.industry || 'Unknown',
             companyName,
           }, dependencies);
-          // Merge LLM-scored news back into full list
-          result = ruleScoredNews.map((news) => {
+          result = allNews.map((news) => {
             const llmVersion = llmScored.find((n) => n.title === news.title);
             return llmVersion || news;
           });
@@ -1043,6 +1248,24 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
         return result;
       } catch {
         return [];
+      }
+    })(),
+    (async () => {
+      if (!isAsx) return null;
+      try {
+        return await withTimeout(
+          fetchAsicShortSellingData(ticker),
+          ENRICHMENT_TIMEOUT_MS,
+          `ASIC short data for ${ticker}`
+        );
+      } catch (error) {
+        console.warn(`ASIC short data unavailable for ${ticker}, using mock:`, error.message);
+        return {
+          shortPercent: 2.0,
+          shortTurnover: 0,
+          dataSource: 'Mock (ShortMan timeout)',
+          isMock: true,
+        };
       }
     })(),
   ]);
@@ -1094,6 +1317,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
       upside: effectiveTargetMean > 0 ? parseFloat((((effectiveTargetMean - price) / price) * 100).toFixed(1)) : 0,
     },
     news: yahooNews,
+    shortMetrics,
     macroContext: buildMacroContext({
       ticker,
       sector: sp.sector || sp.industry || 'Unknown',
@@ -1104,6 +1328,16 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
     collectedAt: new Date().toISOString(),
     dataSource: 'yahoo-finance',
     fallbackReason: null,
+    // Data source breakdown for UI transparency
+    dataSourceBreakdown: {
+      price: 'Yahoo Finance (Real)',
+      technicals: 'Yahoo Finance (Real)',
+      news: yahooNews.length > 0 ? 'Yahoo + ASX + Google (Real)' : 'No news found',
+      shortMetrics: shortMetrics && !shortMetrics.isMock
+        ? (shortMetrics.dataSource || 'ASIC (Real)')
+        : (shortMetrics?.dataSource || 'Mock'),
+      macro: macroNews.length > 0 ? 'Finnhub + NewsAPI (Real)' : 'No macro news',
+    },
     perfMs: {
       total: Date.now() - startTotal,
       yahooPriceApi: perfMs.yahooPriceApi,
@@ -1326,6 +1560,9 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
   let finnhubRecommendations = null;
   let finnhubPriceTarget = null;
 
+  let finnhubMacroNews = [];
+  let newsApiMacroNews = [];
+
   if (config.finnhubApiKey) {
     const enrichmentResults = await Promise.allSettled([
       withTimeout(fetchFinnhubProfile(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub profile fetch for ${ticker}`),
@@ -1336,6 +1573,8 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       }, dependencies), ENRICHMENT_TIMEOUT_MS, `Finnhub company news fetch for ${ticker}`),
       withTimeout(fetchFinnhubRecommendations(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub recommendations fetch for ${ticker}`),
       withTimeout(fetchFinnhubPriceTarget(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub price target fetch for ${ticker}`),
+      withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
+      withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
     ]);
 
     finnhubProfile = enrichmentResults[0].status === 'fulfilled' ? enrichmentResults[0].value : null;
@@ -1343,15 +1582,16 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
     finnhubNews = enrichmentResults[2].status === 'fulfilled' ? enrichmentResults[2].value : [];
     finnhubRecommendations = enrichmentResults[3].status === 'fulfilled' ? enrichmentResults[3].value : null;
     finnhubPriceTarget = enrichmentResults[4].status === 'fulfilled' ? enrichmentResults[4].value : null;
+    finnhubMacroNews = enrichmentResults[5].status === 'fulfilled' ? enrichmentResults[5].value : [];
+    newsApiMacroNews = enrichmentResults[6].status === 'fulfilled' ? enrichmentResults[6].value : [];
+  } else {
+    const [finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
+      withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
+      withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
+    ]);
+    finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
+    newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
   }
-
-  const [finnhubMacroNewsResult, newsApiMacroNewsResult] = await Promise.allSettled([
-    withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
-    withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
-  ]);
-
-  const finnhubMacroNews = finnhubMacroNewsResult.status === 'fulfilled' ? finnhubMacroNewsResult.value : [];
-  const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
 
   // Use Finnhub data if available, otherwise use fallbacks
   const name = finnhubProfile?.name || `${ticker} Corp.`;
@@ -1479,7 +1719,7 @@ async function fetchAlphaVantagePriceHistory(ticker) {
   }
 
   const getVolume = (candle) => safeNumber(candle['6. volume'] ?? candle['5. volume']);
-  const recentDatesAsc = allDates.slice(-100);
+  const recentDatesAsc = allDates.slice(-500);  // Last 500 trading days (~2 years)
   const priceHistory = recentDatesAsc.map((date) => {
     const candle = series[date] || {};
     return {

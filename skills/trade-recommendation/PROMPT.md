@@ -13,6 +13,9 @@ Output:
 
 Rules:
 - Use only the supplied signals, EDA context, and macro context.
+- Honor the supplied investor objective and time horizon.
+- For SHORT horizon, emphasize tactical momentum, setup quality, and risk control.
+- For LONG horizon, emphasize trend durability, fundamentals, analyst expectations, and valuation discipline.
 - Reflect both bullish and bearish evidence when mixed.
 - Do not invent catalysts, prices, or risk factors not present in the input.
 - Match conviction to the provided action and score.

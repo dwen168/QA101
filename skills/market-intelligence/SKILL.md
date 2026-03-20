@@ -36,14 +36,40 @@ Provide a comprehensive market intelligence snapshot for a single equity. This s
 - Normalize the ticker to uppercase and strip whitespace.
 - Reject any input that is not 1–5 uppercase letters; return an error if invalid.
 
-### Step 2 — Fetch Price Data
-Collect the following price metrics (live or from mock generator):
+### Step 2 — Fetch Price Data & Core Market Metrics (Live, Timeout-Protected)
+Collect the following price metrics from live APIs:
 - **Current price**, previous close, change ($), change (%)
 - **52-week high** and **52-week low**
 - **Market cap**, P/E ratio, EPS
 - **Volume** (today) and **average volume** (30-day)
-- **30-day OHLCV history** (date, open, high, low, close, volume for each day)
-- Apply a configurable timeout to live data requests; if live data fails or times out, fall back to mock data and record the fallback reason
+- **30-day+ OHLCV history** (date, open, high, low, close, volume for each day)
+
+**Live Data Sources:**
+- **US/International tickers** (AAPL, MSFT, etc.): Yahoo Finance (yfinance library)
+  - Default timeout: 10 seconds. If exceeded, entire market data falls back to mock.
+  - International tickers (with `.` notation) always use Yahoo Finance (e.g., `MSB.AX` for ASX)
+- **US domestic tickers** (AAPL, TSLA, etc., without `.`): Try Finnhub first, fall back to Alpha Vantage
+  - Finnhub timeout: 5 seconds
+  - Alpha Vantage timeout: 10 seconds
+
+**Fallback to Mock Data:**
+- If core price/OHLCV data times out or API fails, generate a complete mock `MarketData` object with synthetic:
+  - Price history (100 candles with realistic walk-forward volatility)
+  - Technical indicators (MA20, MA50, MA200, RSI, MACD, etc.)
+  - Analyst consensus (random counts and targets)
+  - News (empty array, triggering fallback label)
+- Mark in response: `dataSource: "mock"`, `fallbackReason: "<error message>"`
+- This ensures core recommendation logic never breaks, but UI clearly shows fallback status
+
+**Timeout Safety:**
+- Core price fetch is wrapped in `Promise.all([chart_fetch, summary_fetch])` with timeout enforcement
+- If price data fails/times out → entire response is mock
+- Supplementary data (news, short metrics, macro) failures → continue with partial data (see Step 3B–4B below)
+
+**Parallel Orchestration (Performance):**
+- Yahoo (`.AX` and other international) path runs **company news + macro news + short metrics** in parallel
+- Finnhub/Alpha enrichment path runs **profile + metrics + company news + recommendations + price targets + macro feeds** in parallel where available
+- `Promise.allSettled` is used for supplementary fetches so partial failures do not block successful sources
 
 ### Step 3 — Compute Technical Indicators
 Using the 30-day price history:
@@ -65,19 +91,124 @@ Using the 30-day price history:
 - **OBV (On-Balance Volume)** — Cumulative volume with price direction; confirm trends
 - **VWAP (Volume Weighted Average Price)** — Fair value price; support/resistance levels
 
-### Step 4 — Retrieve News & Sentiment
-- Collect 5 recent headlines relevant to the ticker.
-- For each headline, record: title, source, sentiment score (−1.0 to +1.0), hoursAgo.
-- Score headline sentiment with rule-based keyword logic; do not call an LLM for headline scoring.
-- Aggregate sentiment into a single `sentimentScore` (average of headline scores).
-- Classify `sentimentLabel`: BULLISH (> 0.3), BEARISH (< −0.3), or NEUTRAL.
+### Step 4 — Retrieve News & Sentiment (Supplementary, Partial Failures Acceptable)
+Collect relevant company news headlines. Unlike core price data, **partial news fetch failures do NOT trigger full mock response.**
 
-### Step 4B — Retrieve Macro & Geopolitical Context
-- Collect recent macro headlines that can move the broader market, such as war escalation, sanctions, tariff or policy changes, Fed guidance, inflation, oil shocks, and recession-risk narratives.
-- Tag each macro headline with a theme such as `GEOPOLITICS`, `MONETARY_POLICY`, `POLITICS_POLICY`, `ENERGY_COMMODITIES`, `MARKET_STRESS`, or `SUPPLY_CHAIN`.
-- Aggregate the macro feed into a `macroContext` object with sentiment, risk level, dominant themes, and stock-specific impact notes.
+**Live Data Sources (Parallel Fetch):**
+1. **Yahoo Finance News Search** — For international tickers (`.AX`, `.HK`, etc.)
+   - Tries `yf.search(ticker, { newsCount: 5, quotesCount: 0 })`
+   - Timeout: 5 seconds
+   
+2. **ASX Company Announcements API** (ASX tickers only `xx.AX`)
+   - Direct HTTP fetch from `https://www.asx.com.au/asx/1/company/{CODE}/announcements`
+   - No API key required. Returns official price-sensitive announcements.
+   - Timeout: 5 seconds
+   
+3. **Google News RSS** (ASX tickers only)
+   - RSS feed from `https://news.google.com/rss/search?q={TICKER}+ASX`
+   - Covers Australian media (AFR, SMH, The Australian)
+   - Timeout: 5 seconds
 
-### Step 5 — Analyst Consensus
+**News Processing:**
+- Collect headlines; limit to 5–8 per source
+- Score sentiment using **rule-based keyword logic** (positive/negative keyword matching, no LLM inference)
+- Aggregate across sources; deduplicate by title
+- Preferred headlines: explicitly mention ticker or company name
+- Fallback: if no named headlines found, use all headlines (common for small-cap ASX stocks)
+
+**Failure Handling:**
+- If all news sources timeout/fail → return `news: []`, `dataSourceBreakdown.news: "No news found"`
+- If some sources succeed (e.g., Yahoo + Google but ASX fails) → merge successful sources, mark appropriately
+- No mock news is generated; empty or partial subset is acceptable
+- UI displays: "No news found" with gray badge, or lists available sources (Yahoo Finance, ASX, Google News)
+
+**Supplementary News:** Do NOT call LLM for brief sentiment scoring on every headline; use LLM only for **relevant company news**:
+- LLM is called on relevant company headlines to refine rule-based sentiment
+- LLM receives 5–8 headlines per call with company context
+- Timeout: 5 seconds for LLM call
+
+### Step 4C — Retrieve Macro & Geopolitical Context (Supplementary, Partial Failure Acceptable)
+Collect and score recent macro headlines that can move the broader market. Unlike core price data, **macro data failure does NOT trigger full mock response.**
+
+**Live Data Sources (Parallel Fetch):**
+1. **Finnhub Macro News**
+   - Endpoint: `https://finnhub.io/api/v1/company-news?symbol=^DJI` (market-wide)
+   - Timeout: 5 seconds
+2. **NewsAPI Global News**
+   - Endpoint: Query for broad market keywords (stock market, Fed, inflation, oil, geopolitics)
+   - Timeout: 5 seconds
+
+**Macro Processing:**
+- Collect 8 recent macro headlines
+- Tag each with theme: `GEOPOLITICS`, `MONETARY_POLICY`, `POLITICS_POLICY`, `ENERGY_COMMODITIES`, `MARKET_STRESS`, `SUPPLY_CHAIN`, or `GENERAL_MACRO`
+- Call LLM to refine sentiment scores and theme confidence (timeout: 5 seconds; skip if LLM unavailable)
+- Aggregate feed into `macroContext` object with sentiment, risk level, dominant themes, and stock-specific impact notes
+
+**Failure Handling:**
+- If both Finnhub and NewsAPI timeout → return `macroContext.available: false`, `macroNews: []`
+- If one source succeeds → use available data
+- UI displays: "No macro context" or lists available sources
+- Recommendation engine uses sensible defaults if macro data unavailable (assume "MEDIUM" risk)
+
+### Step 5B — Retrieve ASX Short Selling Interest (ASX Tickers Only, Supplementary)
+For tickers ending in `.AX` (Australian Securities Exchange), fetch and score short interest data. **Short data failure does NOT trigger full mock response.**
+
+**Live Data Sources (Try in Order):**
+1. **ShortMan stock page** — Primary live source (aggregated from ASIC)
+  - Endpoint pattern: `https://www.shortman.com.au/stock?q=<asx_code_lowercase>`
+  - Parsed field: **Current position** (short %)
+  - Data note: ShortMan reflects ASIC series with T+4 delay
+  - Timeout: 5 seconds
+
+2. **Mock Short Data (fixed fallback)**
+  - If ShortMan fetch/parsing fails, return fixed fallback
+  - Fallback value: `shortPercent: 2.0`, `shortTurnover: 0`
+  - Marked as `dataSource: "Mock (ShortMan unavailable)"` or `"Mock (ShortMan timeout)"`, `isMock: true`
+
+**Short Data Processing:**
+- Extract `shortPercent` (short position as % of float); `shortTurnover` may be `0` when unavailable
+- Mark data source as either "ShortMan (ASIC aggregated)" or ShortMan-related mock source labels
+- Return as `shortMetrics` object with source label
+
+**Failure Handling:**
+
+**Selective Fallback Strategy** (v2.0+) — Compare old vs. new behavior:
+
+| Scenario | New Logic |
+|----------|-----------|
+| Short data timeout | ✅ Price + Technical + News real + Short mock |
+| News fetch failure | ✅ Price + Technical + Recommendation real + News empty |
+| Macro news failure | ✅ Other data real + Macro empty |
+
+Granular fallback rules:
+- Timeout or parse failure on ShortMan → fall back to fixed mock `2.0%`
+- **All failures degrade gracefully; recommendation continues with `shortMetrics` available but marked as mock**
+- UI shows short source as mock, but this does **not** imply full-report mock
+- Top-level "Using Mock Data" headline is driven by core data state; short-only mock does not trigger it
+After all data fetches complete, compile a **`dataSourceBreakdown`** object documenting the source of each major data category:
+
+```json
+"dataSourceBreakdown": {
+  "price": "Yahoo Finance (Real)",        // or "Mock" if timeout
+  "technicals": "Yahoo Finance (Real)",   // computed from real/mock price history
+  "news": "Yahoo + ASX + Google (Real)" | "No news found" | "Mock",
+  "shortMetrics": "ShortMan (ASIC aggregated)" | "Mock (ShortMan unavailable)" | "Mock (ShortMan timeout)",
+  "macro": "Finnhub + NewsAPI (Real)" | "No macro news" | "Unavailable"
+}
+```
+
+**Purpose:**
+- Frontend displays these labels next to each data section (price, news, short metrics, macro context)
+- Users see at a glance which data is live, cached, or mock
+- Distinguishes between "no data fetched" (e.g., no news available) vs. "data is mock" (e.g., API timeout)
+- UI color codes: green = Real, yellow = Mock, gray = Unavailable/No data
+
+**Behavioral Guarantees:**
+1. **If core price data is real** → recommendation engine has high confidence, uses all available signals
+2. **If core price data is mock** → recommendation engine discloses fallback prominently, uses caution
+3. **If any supplementary data is mock/missing** (news, short, macro) → recommendation engine works normally, but those signals are absent or muted
+
+### Step 6 — Analyst Consensus
 Aggregate analyst ratings:
 - Counts: strongBuy, buy, hold, sell, strongSell
 - Price targets: targetHigh, targetLow, targetMean

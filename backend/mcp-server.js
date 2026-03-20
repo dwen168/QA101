@@ -74,10 +74,11 @@ server.tool(
   {
     marketData: z.object({}).passthrough().describe('The marketData object returned by market_intelligence.'),
     edaInsights: z.object({}).passthrough().optional().describe('Optional edaInsights object returned by eda_visual_analysis.'),
+    timeHorizon: z.enum(['SHORT', 'MEDIUM', 'LONG']).optional().describe('Investor objective for this recommendation.'),
   },
-  async ({ marketData, edaInsights }) => {
+  async ({ marketData, edaInsights, timeHorizon }) => {
     try {
-      return asToolResult(await runTradeRecommendation({ marketData, edaInsights }));
+      return asToolResult(await runTradeRecommendation({ marketData, edaInsights, timeHorizon }));
     } catch (error) {
       return asToolError(error);
     }
@@ -89,10 +90,11 @@ server.tool(
   'Run the full QuantBot pipeline: market intelligence, EDA, and trade recommendation.',
   {
     ticker: z.string().describe('Stock ticker symbol, for example AAPL or NVDA.'),
+    timeHorizon: z.enum(['SHORT', 'MEDIUM', 'LONG']).optional().describe('Investor objective for this full analysis.'),
   },
-  async ({ ticker }) => {
+  async ({ ticker, timeHorizon }) => {
     try {
-      return asToolResult(await runFullAnalysis({ ticker }));
+      return asToolResult(await runFullAnalysis({ ticker, timeHorizon }));
     } catch (error) {
       return asToolError(error);
     }
@@ -137,15 +139,17 @@ server.tool(
   {
     ticker: z.string().describe('Stock ticker symbol to backtest, e.g., AAPL.'),
     strategyName: z.enum(['trade-recommendation', 'macd-bb', 'rsi-ma']).optional().default('trade-recommendation').describe('Strategy type: trade-recommendation (15+ signals), macd-bb, or rsi-ma.'),
+    timeHorizon: z.enum(['SHORT', 'MEDIUM', 'LONG']).optional().default('MEDIUM').describe('Backtest horizon profile: SHORT, MEDIUM, or LONG.'),
     startDate: z.string().describe('Backtest start date in YYYY-MM-DD format, e.g., 2025-01-01.'),
     endDate: z.string().describe('Backtest end date in YYYY-MM-DD format, e.g., 2026-03-18.'),
     initialCapital: z.number().optional().default(100000).describe('Starting portfolio value in USD.'),
   },
-  async ({ ticker, strategyName, startDate, endDate, initialCapital }) => {
+  async ({ ticker, strategyName, timeHorizon, startDate, endDate, initialCapital }) => {
     try {
       return asToolResult(await runBacktest({
         ticker,
         strategyName,
+        timeHorizon,
         startDate,
         endDate,
         initialCapital,

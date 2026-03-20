@@ -6,6 +6,105 @@ const { calculateATR, calculateVaR } = require('../../../backend/lib/technical-i
 
 const skills = loadSkills();
 
+function normalizeTimeHorizon(value = 'MEDIUM') {
+  const normalized = String(value || '').trim().toUpperCase();
+  return ['SHORT', 'MEDIUM', 'LONG'].includes(normalized) ? normalized : 'MEDIUM';
+}
+
+function getRecommendationProfile(timeHorizon = 'MEDIUM') {
+  const normalized = normalizeTimeHorizon(timeHorizon);
+  const profiles = {
+    SHORT: {
+      timeHorizon: 'SHORT',
+      label: 'Short-term tactical',
+      holdingPeriod: 'Up to 8 weeks',
+      focus: 'Momentum, breakout confirmation, execution timing, and tight risk control.',
+      signalMultipliers: {
+        trend: 1.0,
+        longTrend: 0.6,
+        oscillator: 1.2,
+        sentiment: 0.9,
+        macro: 0.8,
+        analyst: 0.6,
+        valuation: 0.4,
+        momentum: 1.3,
+        technical: 1.2,
+        intraday: 1.2,
+        eda: 1.2,
+      },
+      atrStopMultiplier: 1.2,
+      atrTargetMultiplier: 2.0,
+    },
+    MEDIUM: {
+      timeHorizon: 'MEDIUM',
+      label: 'Medium-term balanced',
+      holdingPeriod: 'Several weeks to a few months',
+      focus: 'Balanced mix of trend, momentum, macro, analyst sentiment, and risk-adjusted setup quality.',
+      signalMultipliers: {
+        trend: 1.0,
+        longTrend: 1.0,
+        oscillator: 1.0,
+        sentiment: 1.0,
+        macro: 1.0,
+        analyst: 1.0,
+        valuation: 1.0,
+        momentum: 1.0,
+        technical: 1.0,
+        intraday: 1.0,
+        eda: 1.0,
+      },
+      atrStopMultiplier: 1.5,
+      atrTargetMultiplier: 2.5,
+    },
+    LONG: {
+      timeHorizon: 'LONG',
+      label: 'Medium/long-term fundamental',
+      holdingPeriod: 'Multi-month holding period',
+      focus: 'Trend durability, fundamentals, analyst expectations, valuation discipline, and macro regime.',
+      signalMultipliers: {
+        trend: 1.1,
+        longTrend: 1.35,
+        oscillator: 0.7,
+        sentiment: 0.75,
+        macro: 1.15,
+        analyst: 1.25,
+        valuation: 1.35,
+        momentum: 0.5,
+        technical: 0.6,
+        intraday: 0.3,
+        eda: 0.8,
+      },
+      atrStopMultiplier: 2.0,
+      atrTargetMultiplier: 4.0,
+    },
+  };
+
+  return profiles[normalized];
+}
+
+function adjustSignalPoints(points, multiplier = 1) {
+  const adjusted = Number(points || 0) * Number(multiplier || 1);
+  return Math.round(adjusted * 2) / 2;
+}
+
+function collectLensSignalNames(signals, profile, predicate) {
+  const names = [];
+  for (const signal of signals) {
+    const multiplier = profile.signalMultipliers[signal.bucket] || 1;
+    if (!predicate(multiplier)) continue;
+    if (!names.includes(signal.name)) names.push(signal.name);
+    if (names.length >= 4) break;
+  }
+  return names;
+}
+
+function buildObjectiveLensSummary(signals, profile) {
+  return {
+    amplifiedSignals: collectLensSignalNames(signals, profile, (multiplier) => multiplier > 1.05),
+    deemphasizedSignals: collectLensSignalNames(signals, profile, (multiplier) => multiplier < 0.95),
+  };
+}
+
 // Rolling RSI helper for historical pattern scan
 function computeRollingRSI(closes, period) {
   if (closes.length < period + 1) return null;
@@ -76,9 +175,10 @@ function findHistoricalPatterns(priceHistory, marketData) {
   };
 }
 
-function scoreSignals(marketData, edaInsights = {}) {
+function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   const signals = [];
   let score = 0;
+  const profile = getRecommendationProfile(timeHorizon);
 
   const macroWeight = (key, fallback) => {
     const value = getSignalWeight(key);
@@ -86,9 +186,11 @@ function scoreSignals(marketData, edaInsights = {}) {
   };
 
   // detail: { label, value } pairs shown as chips in the UI
-  const add = (name, points, reason, detail = null) => {
-    signals.push({ name, points, reason, detail });
-    score += points;
+  const add = (name, points, reason, detail = null, bucket = 'trend') => {
+    const adjustedPoints = adjustSignalPoints(points, profile.signalMultipliers[bucket] || 1);
+    if (adjustedPoints === 0) return;
+    signals.push({ name, points: adjustedPoints, reason, detail, bucket });
+    score += adjustedPoints;
   };
 
   const fmt = (n, digits = 2) => (n == null ? '—' : Number(n).toFixed(digits));
@@ -106,13 +208,13 @@ function scoreSignals(marketData, edaInsights = {}) {
       { label: 'Price', value: `$${fmt(p)}` },
       { label: 'MA50', value: `$${fmt(ma50)}` },
       { label: 'Gap', value: `+${fmt(pctVsMa50, 1)}%` },
-    ]);
+    ], 'trend');
   } else {
     add('Price < MA50', w('trend_ma50_bearish'), 'Bearish trend - price below medium-term average', [
       { label: 'Price', value: `$${fmt(p)}` },
       { label: 'MA50', value: `$${fmt(ma50)}` },
       { label: 'Gap', value: `${fmt(pctVsMa50, 1)}%` },
-    ]);
+    ], 'trend');
   }
 
   if (p > ma200) {
@@ -120,13 +222,13 @@ function scoreSignals(marketData, edaInsights = {}) {
       { label: 'Price', value: `$${fmt(p)}` },
       { label: 'MA200', value: `$${fmt(ma200)}` },
       { label: 'Gap', value: `+${fmt(pctVsMa200, 1)}%` },
-    ]);
+    ], 'longTrend');
   } else {
     add('Price < MA200', w('trend_ma200_bearish'), 'Long-term downtrend', [
       { label: 'Price', value: `$${fmt(p)}` },
       { label: 'MA200', value: `$${fmt(ma200)}` },
       { label: 'Gap', value: `${fmt(pctVsMa200, 1)}%` },
-    ]);
+    ], 'longTrend');
   }
 
   // RSI signals
@@ -135,17 +237,17 @@ function scoreSignals(marketData, edaInsights = {}) {
     add('RSI Overbought', w('rsi_overbought'), `RSI > 70 — overextended`, [
       { label: 'RSI', value: fmt(rsi, 1) },
       { label: 'Zone', value: 'Overbought (>70)' },
-    ]);
+    ], 'oscillator');
   } else if (rsi < 30) {
     add('RSI Oversold', w('rsi_oversold'), `RSI < 30 — contrarian buy signal`, [
       { label: 'RSI', value: fmt(rsi, 1) },
       { label: 'Zone', value: 'Oversold (<30)' },
-    ]);
+    ], 'oscillator');
   } else if (rsi >= 45 && rsi <= 65) {
     add('RSI Healthy', w('rsi_healthy'), `RSI in bullish healthy zone (45–65)`, [
       { label: 'RSI', value: fmt(rsi, 1) },
       { label: 'Zone', value: '45–65 Healthy' },
-    ]);
+    ], 'oscillator');
   }
 
   // Sentiment signals
@@ -154,12 +256,29 @@ function scoreSignals(marketData, edaInsights = {}) {
     add('Positive Sentiment', w('sentiment_bullish'), `News sentiment bullish`, [
       { label: 'Score', value: `+${fmt(sent, 2)}` },
       { label: 'Label', value: marketData.sentimentLabel },
-    ]);
+    ], 'sentiment');
   } else if (sent < -0.3) {
     add('Negative Sentiment', w('sentiment_bearish'), `News sentiment bearish`, [
       { label: 'Score', value: fmt(sent, 2) },
       { label: 'Label', value: marketData.sentimentLabel },
-    ]);
+    ], 'sentiment');
+  }
+
+  // ASIC short selling interest signals (ASX only)
+  const shortMetrics = marketData.shortMetrics;
+  if (shortMetrics && shortMetrics.available !== false) {
+    const shortPercent = Number(shortMetrics.shortPercent || 0);
+    if (shortPercent > 5) {
+      add('High Short Interest', w('short_pressure_bearish', -2), `${shortPercent.toFixed(1)}% of float is short — potential shorting pressure.`, [
+        { label: 'Short %', value: `${shortPercent.toFixed(1)}%` },
+        { label: 'Source', value: shortMetrics.dataSource || 'ASIC' },
+      ], 'sentiment');
+    } else if (shortPercent > 2) {
+      add('Moderate Short Interest', w('short_pressure_bearish', -1), `${shortPercent.toFixed(1)}% short — monitor for shorting activity.`, [
+        { label: 'Short %', value: `${shortPercent.toFixed(1)}%` },
+        { label: 'Source', value: shortMetrics.dataSource || 'ASIC' },
+      ], 'sentiment');
+    }
   }
 
   // Macro regime overlay signals
@@ -174,25 +293,25 @@ function scoreSignals(marketData, edaInsights = {}) {
         { label: 'Risk', value: macroRisk },
         { label: 'Tone', value: macro.sentimentLabel || 'RISK_OFF' },
         { label: 'Score', value: fmt(macroSent, 2) },
-      ]);
+      ], 'macro');
     } else if (macroRisk === 'LOW') {
       add('Macro Tailwind', macroWeight('macro_risk_bullish', 1), 'Macro backdrop is supportive for risk assets.', [
         { label: 'Risk', value: macroRisk },
         { label: 'Tone', value: macro.sentimentLabel || 'RISK_ON' },
         { label: 'Score', value: fmt(macroSent, 2) },
-      ]);
+      ], 'macro');
     }
 
     if (macroSent <= -0.25) {
       add('Macro Sentiment Bearish', macroWeight('macro_sentiment_bearish', -1), 'Global macro headlines lean defensive.', [
         { label: 'Score', value: fmt(macroSent, 2) },
         { label: 'Themes', value: macroThemes.slice(0, 2).join(', ') || 'General' },
-      ]);
+      ], 'macro');
     } else if (macroSent >= 0.25) {
       add('Macro Sentiment Supportive', macroWeight('macro_sentiment_bullish', 1), 'Global macro sentiment supports risk-taking.', [
         { label: 'Score', value: `+${fmt(macroSent, 2)}` },
         { label: 'Themes', value: macroThemes.slice(0, 2).join(', ') || 'General' },
-      ]);
+      ], 'macro');
     }
 
     const sector = String(marketData.sector || 'Unknown');
@@ -210,7 +329,7 @@ function scoreSignals(marketData, edaInsights = {}) {
       add('Macro-Sector Headwind', macroWeight('macro_sector_headwind', -1), `Current macro themes directly pressure ${sector}.`, [
         { label: 'Sector', value: sector },
         { label: 'Themes', value: overlapThemes.join(', ') },
-      ]);
+      ], 'macro');
     }
   }
 
@@ -221,34 +340,34 @@ function scoreSignals(marketData, edaInsights = {}) {
       add('EDA Breakout', w('eda_breakout_bullish') || 0.5, 'Price broke above recent 20-day range.', [
         { label: 'Breakout20', value: `+${fmt(edaFactors.breakout20Pct, 2)}%` },
         { label: 'Volume', value: `${fmt(edaFactors.volumeRatio, 2)}x` },
-      ]);
+      ], 'eda');
     } else if (edaFactors.breakoutSignal === 'BEARISH_BREAKDOWN') {
       add('EDA Breakdown', w('eda_breakout_bearish') || -0.5, 'Price lost recent 20-day support.', [
         { label: 'Breakout20', value: `${fmt(edaFactors.breakout20Pct, 2)}%` },
         { label: 'Volume', value: `${fmt(edaFactors.volumeRatio, 2)}x` },
-      ]);
+      ], 'eda');
     }
 
     if (edaFactors.volumeRegime === 'HIGH' && (marketData.changePercent || 0) > 0) {
       add('EDA Volume Confirmation', w('eda_volume_bullish') || 0.5, 'Up move is supported by high volume participation.', [
         { label: 'VolumeRatio', value: `${fmt(edaFactors.volumeRatio, 2)}x` },
-      ]);
+      ], 'eda');
     }
 
     if (edaFactors.volatilityRegime === 'HIGH') {
       add('EDA Volatility Risk', w('eda_volatility_bearish') || -0.5, 'High realized volatility increases execution risk.', [
         { label: 'Vol20', value: `${fmt(edaFactors.volatility20, 1)}%` },
-      ]);
+      ], 'eda');
     }
 
     if (edaFactors.trendStrengthSignal === 'STRONG_UP') {
       add('EDA Trend Strength', w('eda_trend_strength') || 0.5, 'MA20 is meaningfully above MA50.', [
         { label: 'TrendGap', value: `+${fmt(edaFactors.trendStrengthPct, 2)}%` },
-      ]);
+      ], 'eda');
     } else if (edaFactors.trendStrengthSignal === 'STRONG_DOWN') {
       add('EDA Trend Weakness', w('eda_trend_weakness') || -0.5, 'MA20 is meaningfully below MA50.', [
         { label: 'TrendGap', value: `${fmt(edaFactors.trendStrengthPct, 2)}%` },
-      ]);
+      ], 'eda');
     }
   }
 
@@ -261,12 +380,12 @@ function scoreSignals(marketData, edaInsights = {}) {
     add('Strong Analyst Buy', w('analyst_buy_strong'), `Majority of analysts rate Buy or Strong Buy`, [
       { label: 'Buy%', value: `${(buyRatio * 100).toFixed(0)}%` },
       { label: 'Ratings', value: `${consensus.strongBuy + consensus.buy}B / ${consensus.hold}H / ${consensus.sell + consensus.strongSell}S` },
-    ]);
+    ], 'analyst');
   } else if (buyRatio < 0.3) {
     add('Weak Analyst Support', w('analyst_buy_weak'), `Few analysts rate Buy`, [
       { label: 'Buy%', value: `${(buyRatio * 100).toFixed(0)}%` },
       { label: 'Ratings', value: `${consensus.strongBuy + consensus.buy}B / ${consensus.hold}H / ${consensus.sell + consensus.strongSell}S` },
-    ]);
+    ], 'analyst');
   }
 
   if (consensus.upside > 10) {
@@ -274,12 +393,39 @@ function scoreSignals(marketData, edaInsights = {}) {
       { label: 'Upside', value: `+${fmt(consensus.upside, 1)}%` },
       { label: 'Target', value: `$${fmt(consensus.targetMean)}` },
       { label: 'Range', value: `$${fmt(consensus.targetLow)}–$${fmt(consensus.targetHigh)}` },
-    ]);
+    ], 'analyst');
   } else if (consensus.upside < -5) {
     add('Downside Risk', w('analyst_downside'), `Analyst targets below current price`, [
       { label: 'Downside', value: `${fmt(consensus.upside, 1)}%` },
       { label: 'Target', value: `$${fmt(consensus.targetMean)}` },
-    ]);
+    ], 'analyst');
+  }
+
+  const pe = Number(marketData.pe || 0);
+  const eps = Number(marketData.eps || 0);
+  if (Number.isFinite(eps) && eps !== 0) {
+    if (eps > 0) {
+      add('Positive EPS', 1, 'Company is profitable on trailing EPS, which supports a medium/long-term thesis.', [
+        { label: 'EPS', value: `$${fmt(eps)}` },
+        { label: 'P/E', value: pe > 0 ? fmt(pe, 1) : 'N/A' },
+      ], 'valuation');
+    } else {
+      add('Negative EPS', -2, 'Negative trailing EPS weakens a fundamentally driven holding case.', [
+        { label: 'EPS', value: `$${fmt(eps)}` },
+      ], 'valuation');
+    }
+  }
+
+  if (pe > 0 && eps > 0) {
+    if (pe <= 25) {
+      add('Reasonable Valuation', 1, 'Valuation is not obviously stretched for a medium/long-term entry.', [
+        { label: 'P/E', value: fmt(pe, 1) },
+      ], 'valuation');
+    } else if (pe >= 40) {
+      add('Rich Valuation', -1, 'Valuation is rich and leaves less margin of safety if growth expectations fade.', [
+        { label: 'P/E', value: fmt(pe, 1) },
+      ], 'valuation');
+    }
   }
 
   // Daily momentum signals
@@ -289,13 +435,13 @@ function scoreSignals(marketData, edaInsights = {}) {
       { label: 'Change', value: `+${fmt(chg, 2)}%` },
       { label: 'Price Δ', value: `+$${fmt(marketData.change, 2)}` },
       { label: 'Volume', value: `${(marketData.volume / 1e6).toFixed(1)}M` },
-    ]);
+    ], 'momentum');
   } else if (chg < -2) {
     add('Bearish Day', w('momentum_strong_down'), `Down ${fmt(Math.abs(chg), 1)}% today`, [
       { label: 'Change', value: `${fmt(chg, 2)}%` },
       { label: 'Price Δ', value: `$${fmt(marketData.change, 2)}` },
       { label: 'Volume', value: `${(marketData.volume / 1e6).toFixed(1)}M` },
-    ]);
+    ], 'momentum');
   }
 
   // Technical Indicators scoring (if available)
@@ -309,13 +455,13 @@ function scoreSignals(marketData, edaInsights = {}) {
           { label: 'MACD', value: fmt(ti.macd.macdLine, 3) },
           { label: 'Signal', value: fmt(ti.macd.signalLine, 3) },
           { label: 'Hist', value: `+${fmt(ti.macd.histogram, 3)}` },
-        ]);
+        ], 'technical');
       } else if (ti.macd.signal === 'BEARISH') {
         add('MACD Bearish', w('macd_bearish'), `MACD below signal line — momentum negative`, [
           { label: 'MACD', value: fmt(ti.macd.macdLine, 3) },
           { label: 'Signal', value: fmt(ti.macd.signalLine, 3) },
           { label: 'Hist', value: fmt(ti.macd.histogram, 3) },
-        ]);
+        ], 'technical');
       }
     }
 
@@ -328,14 +474,14 @@ function scoreSignals(marketData, edaInsights = {}) {
           { label: 'Upper', value: `$${fmt(bb.upperBand)}` },
           { label: 'Mid', value: `$${fmt(bb.middleBand)}` },
           { label: 'StdDev', value: fmt(bb.stdDev, 2) },
-        ]);
+        ], 'technical');
       } else if (bb.signal === 'OVERSOLD') {
         add('BB Oversold', w('bb_oversold'), `Price near lower Bollinger Band — bounce opportunity`, [
           { label: 'BB%', value: `${(bb.bbPosition * 100).toFixed(0)}%` },
           { label: 'Lower', value: `$${fmt(bb.lowerBand)}` },
           { label: 'Mid', value: `$${fmt(bb.middleBand)}` },
           { label: 'StdDev', value: fmt(bb.stdDev, 2) },
-        ]);
+        ], 'technical');
       }
     }
 
@@ -346,13 +492,13 @@ function scoreSignals(marketData, edaInsights = {}) {
           { label: 'K', value: fmt(ti.kdj.k, 1) },
           { label: 'D', value: fmt(ti.kdj.d, 1) },
           { label: 'J', value: fmt(ti.kdj.j, 1) },
-        ]);
+        ], 'technical');
       } else if (ti.kdj.signal === 'OVERBOUGHT') {
         add('KDJ Overbought', w('kdj_overbought'), `KDJ in overbought territory — potential pullback`, [
           { label: 'K', value: fmt(ti.kdj.k, 1) },
           { label: 'D', value: fmt(ti.kdj.d, 1) },
           { label: 'J', value: fmt(ti.kdj.j, 1) },
-        ]);
+        ], 'technical');
       }
     }
 
@@ -362,12 +508,12 @@ function scoreSignals(marketData, edaInsights = {}) {
         add('OBV Rising', w('obv_bullish'), `Volume confirms uptrend`, [
           { label: 'OBV', value: (ti.obv.obv / 1e6).toFixed(1) + 'M' },
           { label: 'Trend', value: 'Rising' },
-        ]);
+        ], 'technical');
       } else if (ti.obv.signal === 'BEARISH') {
         add('OBV Falling', w('obv_bearish'), `Volume confirms downtrend`, [
           { label: 'OBV', value: (ti.obv.obv / 1e6).toFixed(1) + 'M' },
           { label: 'Trend', value: 'Falling' },
-        ]);
+        ], 'technical');
       }
     }
 
@@ -379,18 +525,18 @@ function scoreSignals(marketData, edaInsights = {}) {
           { label: 'Price', value: `$${fmt(p)}` },
           { label: 'VWAP', value: `$${fmt(ti.vwap.vwap)}` },
           { label: 'Gap', value: vwapGap != null ? `+${fmt(vwapGap, 1)}%` : '—' },
-        ]);
+        ], 'intraday');
       } else if (ti.vwap.signal === 'BELOW_VWAP') {
         add('Price < VWAP', w('vwap_below'), `Price below VWAP — bearish intraday positioning`, [
           { label: 'Price', value: `$${fmt(p)}` },
           { label: 'VWAP', value: `$${fmt(ti.vwap.vwap)}` },
           { label: 'Gap', value: vwapGap != null ? `${fmt(vwapGap, 1)}%` : '—' },
-        ]);
+        ], 'intraday');
       }
     }
   }
 
-  return { signals, score, buyRatio };
+  return { signals, score: parseFloat(score.toFixed(1)), buyRatio, profile };
 }
 
 function mapAction(score) {
@@ -409,7 +555,65 @@ function mapAction(score) {
   return { action: 'STRONG SELL', actionColor: '#dc2626' };
 }
 
-function buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio) {
+function computeConfidence(score, signals = [], macroRisk = 'MEDIUM') {
+  const absScore = Math.abs(Number(score) || 0);
+  const normalizedScore = Math.min(1, absScore / 10);
+
+  // Saturate slowly so mid scores do not jump to very high confidence.
+  const baseConfidence = 42 + Math.round(34 * Math.tanh(normalizedScore * 1.8));
+
+  const magnitudes = signals.map((signal) => Number(signal?.points) || 0);
+  const positive = magnitudes.filter((value) => value > 0).reduce((sum, value) => sum + value, 0);
+  const negative = magnitudes.filter((value) => value < 0).reduce((sum, value) => sum + Math.abs(value), 0);
+  const totalMagnitude = positive + negative;
+  const alignment = totalMagnitude > 0 ? Math.abs(positive - negative) / totalMagnitude : 0;
+
+  // Strong one-sided evidence gets a boost; mixed evidence gets penalized.
+  const consistencyAdjustment = Math.round((alignment - 0.5) * 14);
+  const conflictPenalty = alignment < 0.3 && totalMagnitude >= 5 ? -6 : 0;
+
+  let confidence = baseConfidence + consistencyAdjustment + conflictPenalty;
+  let signalCountAdjustment = 0;
+
+  if (signals.length <= 3) {
+    confidence -= 4;
+    signalCountAdjustment = -4;
+  }
+  if (signals.length >= 10) {
+    confidence += 2;
+    signalCountAdjustment = 2;
+  }
+
+  let macroAdjustment = 0;
+
+  if (macroRisk === 'HIGH') {
+    confidence -= 8;
+    macroAdjustment = -8;
+  } else if (macroRisk === 'LOW') {
+    confidence += 3;
+    macroAdjustment = 3;
+  }
+
+  const bounded = Math.max(30, Math.min(92, Math.round(confidence)));
+  return {
+    confidence: bounded,
+    breakdown: {
+      base: baseConfidence,
+      consistencyAdjustment,
+      conflictPenalty,
+      signalCountAdjustment,
+      macroAdjustment,
+      rawScore: parseFloat(Number(score || 0).toFixed(1)),
+      alignment: parseFloat((alignment * 100).toFixed(1)),
+      positiveMagnitude: parseFloat(positive.toFixed(1)),
+      negativeMagnitude: parseFloat(negative.toFixed(1)),
+      totalSignalCount: signals.length,
+      final: bounded,
+    },
+  };
+}
+
+function buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile) {
   const macro = marketData?.macroContext || {};
   const macroSentence = macro.available
     ? `Macro regime is ${String(macro.riskLevel || 'MEDIUM').toLowerCase()} risk (${macro.sentimentLabel || 'BALANCED'}), which is included in signal scoring.`
@@ -420,26 +624,32 @@ function buildFallbackRecommendation(marketData, action, signals, confidence, bu
     keyRisks.unshift('Elevated macro and geopolitical risk regime');
   }
 
+  if (profile.timeHorizon === 'SHORT') {
+    keyRisks.unshift('Short-term execution risk and false-breakout risk over the next few weeks');
+  } else if (profile.timeHorizon === 'LONG') {
+    keyRisks.unshift('Fundamental revision and valuation de-rating risk over a multi-month hold');
+  }
+
   return {
-    rationale: `Based on technical, sentiment, and macro regime analysis, ${marketData.ticker} shows a ${marketData.trend} setup with ${marketData.rsi > 50 ? 'positive' : 'weakening'} momentum. Analyst consensus supports the view with ${(buyRatio * 100).toFixed(0)}% buy ratings. ${macroSentence}`,
-    timeHorizon: 'MEDIUM',
-    keyRisks,
-    executiveSummary: `${marketData.ticker} - ${action} recommendation based on ${signals.length} signals with ${confidence}% confidence.`,
+    rationale: `${profile.label} view: ${marketData.ticker} currently shows a ${marketData.trend} setup, and this recommendation emphasizes ${profile.focus.toLowerCase()} Analyst support stands at ${(buyRatio * 100).toFixed(0)}% buy ratings. ${macroSentence}`,
+    timeHorizon: profile.timeHorizon,
+    keyRisks: keyRisks.slice(0, 3),
+    executiveSummary: `${marketData.ticker} - ${action} for a ${profile.label.toLowerCase()} plan with ${confidence}% confidence.`,
   };
 }
 
-async function runTradeRecommendation({ marketData, edaInsights }, dependencies = {}) {
+async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = 'MEDIUM' }, dependencies = {}) {
   requireObject(marketData, 'marketData');
 
-  const { signals, score, buyRatio } = scoreSignals(marketData, edaInsights || {});
+  const normalizedTimeHorizon = normalizeTimeHorizon(timeHorizon);
+  const profile = getRecommendationProfile(normalizedTimeHorizon);
+
+  const { signals, score, buyRatio } = scoreSignals(marketData, edaInsights || {}, normalizedTimeHorizon);
   const { action, actionColor } = mapAction(score);
-  const baseConfidence = Math.min(95, Math.floor((Math.abs(score) / 12) * 100 + 40));
   const macroRisk = String(marketData?.macroContext?.riskLevel || '').toUpperCase();
-  const confidence = macroRisk === 'HIGH'
-    ? Math.max(35, baseConfidence - 8)
-    : macroRisk === 'LOW'
-      ? Math.min(95, baseConfidence + 3)
-      : baseConfidence;
+  const confidenceResult = computeConfidence(score, signals, macroRisk);
+  const confidence = confidenceResult.confidence;
+  const confidenceBreakdown = confidenceResult.breakdown;
 
   const entry = marketData.price;
 
@@ -453,8 +663,8 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
     // Use 14-day ATR instead of 52-week range-based ATR
     atr = calculateATR(marketData.priceHistory, 14);
     if (atr && atr > 0) {
-      stopLoss = parseFloat((entry - atr * 1.5).toFixed(2));
-      takeProfit = parseFloat((entry + atr * 2.5).toFixed(2));
+      stopLoss = parseFloat((entry - atr * profile.atrStopMultiplier).toFixed(2));
+      takeProfit = parseFloat((entry + atr * profile.atrTargetMultiplier).toFixed(2));
     }
 
     // Calculate Value at Risk (95% confidence)
@@ -465,18 +675,20 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
 
   const llm = dependencies.callDeepSeek || callDeepSeek;
   const systemPrompt = `You are a senior quantitative analyst running the trade-recommendation skill.\n\n${skills['trade-recommendation']}\n\nSynthesize all signals and write a clear trade recommendation.`;
-  const userMessage = `Write a trade recommendation for ${marketData.ticker}. Action: ${action}. Score: ${score}. Key signals: ${signals.map((signal) => `${signal.name}(${signal.points > 0 ? '+' : ''}${signal.points})`).join(', ')}. Return JSON with: rationale (2-3 sentences), timeHorizon (SHORT/MEDIUM/LONG), keyRisks (array of 2-3 strings), executiveSummary (1 sentence plain English). Additional EDA context: ${JSON.stringify(edaInsights || {}, null, 2)}. Macro context: ${JSON.stringify(marketData.macroContext || {}, null, 2)}`;
+  const userMessage = `Write a trade recommendation for ${marketData.ticker}. Investment objective: ${profile.label} (${profile.holdingPeriod}). Recommendation focus: ${profile.focus} Action: ${action}. Score: ${score}. Key signals: ${signals.map((signal) => `${signal.name}(${signal.points > 0 ? '+' : ''}${signal.points})`).join(', ')}. Return JSON with: rationale (2-3 sentences), timeHorizon (${normalizedTimeHorizon} only), keyRisks (array of 2-3 strings), executiveSummary (1 sentence plain English). The rationale must fit the supplied investment objective and should not switch to a different horizon. Additional EDA context: ${JSON.stringify(edaInsights || {}, null, 2)}. Macro context: ${JSON.stringify(marketData.macroContext || {}, null, 2)}. Fundamental context: ${JSON.stringify({ pe: marketData.pe, eps: marketData.eps, marketCap: marketData.marketCap, analystConsensus: marketData.analystConsensus }, null, 2)}`;
 
   let llmRecommendation;
   try {
     const analysis = await llm(systemPrompt, userMessage);
-    llmRecommendation = parseJsonResponse(analysis, buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio));
+    llmRecommendation = parseJsonResponse(analysis, buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile));
   } catch {
-    llmRecommendation = buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio);
+    llmRecommendation = buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile);
   }
+  llmRecommendation.timeHorizon = normalizedTimeHorizon;
 
   // Historical pattern matching
   const historicalPatterns = findHistoricalPatterns(marketData.priceHistory, marketData);
+  const objectiveLens = buildObjectiveLensSummary(signals, profile);
 
   // Get weights metadata for transparency
   const weightsMetadata = getWeightsMetadata();
@@ -487,12 +699,21 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
       action,
       actionColor,
       confidence,
+      confidenceBreakdown,
       score,
       signals,
       entry,
       stopLoss,
       takeProfit,
       riskReward,
+      objectiveProfile: {
+        timeHorizon: profile.timeHorizon,
+        label: profile.label,
+        holdingPeriod: profile.holdingPeriod,
+        focus: profile.focus,
+        amplifiedSignals: objectiveLens.amplifiedSignals,
+        deemphasizedSignals: objectiveLens.deemphasizedSignals,
+      },
       macroOverlay: {
         available: !!marketData?.macroContext?.available,
         riskLevel: marketData?.macroContext?.riskLevel || 'UNKNOWN',
@@ -509,8 +730,8 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
     },
     riskMetrics: {
       atr14: atr,
-      atrMultiplierSL: 1.5,
-      atrMultiplierTP: 2.5,
+      atrMultiplierSL: profile.atrStopMultiplier,
+      atrMultiplierTP: profile.atrTargetMultiplier,
       var95: varMetrics,
       riskWarnifVarExceeds: varMetrics ? {
         message: varMetrics.interpretation,
@@ -529,6 +750,8 @@ async function runTradeRecommendation({ marketData, edaInsights }, dependencies 
 }
 
 module.exports = {
+  normalizeTimeHorizon,
+  getRecommendationProfile,
   mapAction,
   runTradeRecommendation,
   scoreSignals,

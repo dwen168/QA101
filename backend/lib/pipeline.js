@@ -3,16 +3,18 @@ const { runEdaVisualAnalysis } = require('../../skills/eda-visual-analysis/scrip
 const { runTradeRecommendation } = require('../../skills/trade-recommendation/scripts');
 const { runPortfolioOptimization } = require('../../skills/portfolio-optimization/scripts');
 
-async function runFullAnalysis({ ticker }) {
+async function runFullAnalysis({ ticker, timeHorizon = 'MEDIUM' }) {
   const marketIntelligence = await runMarketIntelligence({ ticker });
   const eda = await runEdaVisualAnalysis({ marketData: marketIntelligence.marketData });
   const tradeRecommendation = await runTradeRecommendation({
     marketData: marketIntelligence.marketData,
     edaInsights: eda.edaInsights,
+    timeHorizon,
   });
 
   return {
     ticker: marketIntelligence.marketData.ticker,
+    timeHorizon,
     marketIntelligence,
     eda,
     tradeRecommendation,

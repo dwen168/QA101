@@ -1,171 +1,777 @@
 {
-  "timestamp": "2026-03-18T00:00:00.000Z",
-  "version": "1.0-hardcoded",
-  "note": "Run: npm run calibrate-weights -- --symbols AAPL,MSFT,GOOGL to update from historical data",
+  "timestamp": "2026-03-20T20:22:29.374576",
+  "version": "2.1-timeseries-horizon-calibrated",
+  "note": "Time-series CV calibration with blended SHORT/MEDIUM/LONG horizon profiles",
+  "symbols": [
+    "MSB.AX",
+    "CBA.AX",
+    "WEB.AX",
+    "BHP.AX",
+    "PNV.AX",
+    "TPW.AX",
+    "WBC.AX",
+    "CSL.AX"
+  ],
+  "samples": 18000,
+  "positive_ratio": null,
   "model_metrics": {
-    "accuracy": 0.0,
-    "f1_score": 0.0,
-    "auc": 0.0,
-    "status": "No calibration yet - using experience-based defaults"
+    "accuracy": 0.5798666666666666,
+    "f1_score": 0.3170486374018789,
+    "auc": 0.5107090577858595,
+    "pr_auc": 0.3022380619717442,
+    "status": "Time-series CV horizon calibration complete"
   },
   "signal_weights": {
-    "trend_ma50_bullish": {
-      "points": 2,
-      "description": "Price > MA50 (bullish trend)"
-    },
-    "trend_ma50_bearish": {
-      "points": -2,
-      "description": "Price < MA50 (bearish trend)"
-    },
-    "trend_ma200_bullish": {
-      "points": 1,
-      "description": "Price > MA200 (long-term uptrend)"
-    },
-    "trend_ma200_bearish": {
-      "points": -1,
-      "description": "Price < MA200 (long-term downtrend)"
-    },
-    "rsi_oversold": {
-      "points": 1,
-      "description": "RSI < 30 (contrarian buy signal)"
-    },
-    "rsi_healthy": {
-      "points": 1,
-      "description": "RSI 45-65 (healthy bullish zone)"
-    },
-    "rsi_overbought": {
-      "points": -2,
-      "description": "RSI > 70 (overextended, pullback risk)"
-    },
-    "sentiment_bullish": {
-      "points": 2,
-      "description": "Positive sentiment > 0.3"
-    },
-    "sentiment_bearish": {
-      "points": -2,
-      "description": "Negative sentiment < -0.3"
-    },
-    "analyst_buy_strong": {
-      "points": 2,
-      "description": "Buy consensus > 60%"
-    },
-    "analyst_buy_weak": {
-      "points": -1,
-      "description": "Buy consensus < 30%"
-    },
-    "analyst_upside": {
-      "points": 1,
-      "description": "Price target upside > 10%"
-    },
-    "analyst_downside": {
-      "points": -1,
-      "description": "Price target downside < -5%"
-    },
-    "momentum_strong_up": {
-      "points": 1,
-      "description": "Daily change > +1.5%"
-    },
-    "momentum_strong_down": {
-      "points": -1,
-      "description": "Daily change < -2.0%"
-    },
-    "macd_bullish": {
-      "points": 1,
-      "description": "MACD > signal line (momentum positive)"
-    },
-    "macd_bearish": {
-      "points": -1,
-      "description": "MACD < signal line (momentum negative)"
-    },
-    "bb_oversold": {
-      "points": 1,
-      "description": "Price at lower Bollinger Band (bounce opportunity)"
-    },
-    "bb_overbought": {
-      "points": -1,
-      "description": "Price at upper Bollinger Band (pullback risk)"
-    },
-    "kdj_oversold": {
-      "points": 1,
-      "description": "KDJ < 20 (contrarian buy signal)"
-    },
-    "kdj_overbought": {
-      "points": -1,
-      "description": "KDJ > 80 (potential pullback)"
-    },
-    "obv_bullish": {
-      "points": 1,
-      "description": "OBV rising (volume confirms uptrend)"
-    },
-    "obv_bearish": {
-      "points": -1,
-      "description": "OBV falling (volume confirms downtrend)"
-    },
-    "vwap_above": {
-      "points": 1,
-      "description": "Price > VWAP (bullish positioning)"
-    },
     "vwap_below": {
-      "points": -1,
-      "description": "Price < VWAP (bearish positioning)"
-    },
-    "macro_risk_bearish": {
-      "points": -1,
-      "description": "Macro regime is high-risk / risk-off"
-    },
-    "macro_risk_bullish": {
-      "points": 0.5,
-      "description": "Macro regime is low-risk / risk-on"
-    },
-    "macro_sentiment_bearish": {
-      "points": -0.5,
-      "description": "Macro headline sentiment is bearish"
+      "points": -1.0,
+      "description": "Calibrated weight for vwap_below"
     },
     "macro_sentiment_bullish": {
       "points": 0.5,
-      "description": "Macro headline sentiment is supportive"
+      "description": "Calibrated weight for macro_sentiment_bullish"
     },
-    "macro_sector_headwind": {
-      "points": -0.5,
-      "description": "Dominant macro themes create direct sector headwinds"
-    },
-    "eda_breakout_bullish": {
-      "points": 0.5,
-      "description": "EDA breakout above recent 20-day range"
-    },
-    "eda_breakout_bearish": {
-      "points": -0.5,
-      "description": "EDA breakdown below recent 20-day range"
-    },
-    "eda_volume_bullish": {
-      "points": 0.5,
-      "description": "EDA high-volume confirmation on positive move"
-    },
-    "eda_volatility_bearish": {
-      "points": -0.5,
-      "description": "EDA high volatility regime risk penalty"
-    },
-    "eda_trend_strength": {
-      "points": 0.5,
-      "description": "EDA trend strength (MA20 significantly above MA50)"
+    "kdj_overbought": {
+      "points": -1.195,
+      "description": "Calibrated weight for kdj_overbought"
     },
     "eda_trend_weakness": {
       "points": -0.5,
-      "description": "EDA trend weakness (MA20 significantly below MA50)"
+      "description": "Calibrated weight for eda_trend_weakness"
+    },
+    "sentiment_bullish": {
+      "points": 2.0,
+      "description": "Calibrated weight for sentiment_bullish"
+    },
+    "kdj_oversold": {
+      "points": 1.522,
+      "description": "Calibrated weight for kdj_oversold"
+    },
+    "macd_bearish": {
+      "points": -1.0,
+      "description": "Calibrated weight for macd_bearish"
+    },
+    "vwap_above": {
+      "points": 1.24,
+      "description": "Calibrated weight for vwap_above"
+    },
+    "trend_ma50_bullish": {
+      "points": 1.857,
+      "description": "Calibrated weight for trend_ma50_bullish"
+    },
+    "analyst_upside": {
+      "points": 1.0,
+      "description": "Calibrated weight for analyst_upside"
+    },
+    "eda_trend_strength": {
+      "points": 0.5,
+      "description": "Calibrated weight for eda_trend_strength"
+    },
+    "momentum_strong_up": {
+      "points": 1.063,
+      "description": "Calibrated weight for momentum_strong_up"
+    },
+    "eda_breakout_bullish": {
+      "points": 0.5,
+      "description": "Calibrated weight for eda_breakout_bullish"
+    },
+    "rsi_overbought": {
+      "points": -1.605,
+      "description": "Calibrated weight for rsi_overbought"
+    },
+    "obv_bullish": {
+      "points": 1.344,
+      "description": "Calibrated weight for obv_bullish"
+    },
+    "eda_breakout_bearish": {
+      "points": -0.5,
+      "description": "Calibrated weight for eda_breakout_bearish"
+    },
+    "sentiment_bearish": {
+      "points": -2.0,
+      "description": "Calibrated weight for sentiment_bearish"
+    },
+    "short_pressure_bearish": {
+      "points": -1.5,
+      "description": "ASIC high short interest (>5% float) — bearish pressure signal"
+    },
+    "rsi_oversold": {
+      "points": 1.264,
+      "description": "Calibrated weight for rsi_oversold"
+    },
+    "eda_volatility_bearish": {
+      "points": -0.5,
+      "description": "Calibrated weight for eda_volatility_bearish"
+    },
+    "analyst_buy_weak": {
+      "points": -1.0,
+      "description": "Calibrated weight for analyst_buy_weak"
+    },
+    "trend_ma50_bearish": {
+      "points": -2.0,
+      "description": "Calibrated weight for trend_ma50_bearish"
+    },
+    "trend_ma200_bullish": {
+      "points": 1.651,
+      "description": "Calibrated weight for trend_ma200_bullish"
+    },
+    "trend_ma200_bearish": {
+      "points": -1.0,
+      "description": "Calibrated weight for trend_ma200_bearish"
+    },
+    "macro_sentiment_bearish": {
+      "points": -0.5,
+      "description": "Calibrated weight for macro_sentiment_bearish"
+    },
+    "analyst_buy_strong": {
+      "points": 2.0,
+      "description": "Calibrated weight for analyst_buy_strong"
+    },
+    "analyst_downside": {
+      "points": -1.0,
+      "description": "Calibrated weight for analyst_downside"
+    },
+    "rsi_healthy": {
+      "points": 1.183,
+      "description": "Calibrated weight for rsi_healthy"
+    },
+    "momentum_strong_down": {
+      "points": -0.947,
+      "description": "Calibrated weight for momentum_strong_down"
+    },
+    "bb_oversold": {
+      "points": 1.158,
+      "description": "Calibrated weight for bb_oversold"
+    },
+    "obv_bearish": {
+      "points": -1.0,
+      "description": "Calibrated weight for obv_bearish"
+    },
+    "macro_risk_bearish": {
+      "points": -1.0,
+      "description": "Calibrated weight for macro_risk_bearish"
+    },
+    "bb_overbought": {
+      "points": -1.033,
+      "description": "Calibrated weight for bb_overbought"
+    },
+    "macd_bullish": {
+      "points": 1.456,
+      "description": "Calibrated weight for macd_bullish"
+    },
+    "macro_risk_bullish": {
+      "points": 0.5,
+      "description": "Calibrated weight for macro_risk_bullish"
+    },
+    "macro_sector_headwind": {
+      "points": -0.5,
+      "description": "Calibrated weight for macro_sector_headwind"
+    },
+    "eda_volume_bullish": {
+      "points": 0.5,
+      "description": "Calibrated weight for eda_volume_bullish"
+    }
+  },
+  "signal_weights_by_horizon": {
+    "5": {
+      "trend_ma50_bullish": {
+        "points": 2.0,
+        "description": "H5 calibrated weight for trend_ma50_bullish"
+      },
+      "trend_ma50_bearish": {
+        "points": -2.0,
+        "description": "H5 calibrated weight for trend_ma50_bearish"
+      },
+      "trend_ma200_bullish": {
+        "points": 1.351,
+        "description": "H5 calibrated weight for trend_ma200_bullish"
+      },
+      "trend_ma200_bearish": {
+        "points": -1.0,
+        "description": "H5 calibrated weight for trend_ma200_bearish"
+      },
+      "rsi_oversold": {
+        "points": 1.303,
+        "description": "H5 calibrated weight for rsi_oversold"
+      },
+      "rsi_healthy": {
+        "points": 1.26,
+        "description": "H5 calibrated weight for rsi_healthy"
+      },
+      "rsi_overbought": {
+        "points": -1.917,
+        "description": "H5 calibrated weight for rsi_overbought"
+      },
+      "sentiment_bullish": {
+        "points": 2.0,
+        "description": "H5 calibrated weight for sentiment_bullish"
+      },
+      "sentiment_bearish": {
+        "points": -2.0,
+        "description": "H5 calibrated weight for sentiment_bearish"
+      },
+      "analyst_buy_strong": {
+        "points": 2.0,
+        "description": "H5 calibrated weight for analyst_buy_strong"
+      },
+      "analyst_buy_weak": {
+        "points": -1.0,
+        "description": "H5 calibrated weight for analyst_buy_weak"
+      },
+      "analyst_upside": {
+        "points": 1.0,
+        "description": "H5 calibrated weight for analyst_upside"
+      },
+      "analyst_downside": {
+        "points": -1.0,
+        "description": "H5 calibrated weight for analyst_downside"
+      },
+      "momentum_strong_up": {
+        "points": 1.116,
+        "description": "H5 calibrated weight for momentum_strong_up"
+      },
+      "momentum_strong_down": {
+        "points": -0.973,
+        "description": "H5 calibrated weight for momentum_strong_down"
+      },
+      "macd_bullish": {
+        "points": 1.575,
+        "description": "H5 calibrated weight for macd_bullish"
+      },
+      "macd_bearish": {
+        "points": -1.0,
+        "description": "H5 calibrated weight for macd_bearish"
+      },
+      "bb_oversold": {
+        "points": 1.318,
+        "description": "H5 calibrated weight for bb_oversold"
+      },
+      "bb_overbought": {
+        "points": -1.092,
+        "description": "H5 calibrated weight for bb_overbought"
+      },
+      "kdj_oversold": {
+        "points": 1.381,
+        "description": "H5 calibrated weight for kdj_oversold"
+      },
+      "kdj_overbought": {
+        "points": -1.324,
+        "description": "H5 calibrated weight for kdj_overbought"
+      },
+      "obv_bullish": {
+        "points": 1.374,
+        "description": "H5 calibrated weight for obv_bullish"
+      },
+      "obv_bearish": {
+        "points": -1.0,
+        "description": "H5 calibrated weight for obv_bearish"
+      },
+      "vwap_above": {
+        "points": 1.352,
+        "description": "H5 calibrated weight for vwap_above"
+      },
+      "vwap_below": {
+        "points": -1.0,
+        "description": "H5 calibrated weight for vwap_below"
+      },
+      "macro_risk_bearish": {
+        "points": -1.0,
+        "description": "H5 calibrated weight for macro_risk_bearish"
+      },
+      "macro_risk_bullish": {
+        "points": 0.5,
+        "description": "H5 calibrated weight for macro_risk_bullish"
+      },
+      "macro_sentiment_bearish": {
+        "points": -0.5,
+        "description": "H5 calibrated weight for macro_sentiment_bearish"
+      },
+      "macro_sentiment_bullish": {
+        "points": 0.5,
+        "description": "H5 calibrated weight for macro_sentiment_bullish"
+      },
+      "macro_sector_headwind": {
+        "points": -0.5,
+        "description": "H5 calibrated weight for macro_sector_headwind"
+      },
+      "eda_breakout_bullish": {
+        "points": 0.5,
+        "description": "H5 calibrated weight for eda_breakout_bullish"
+      },
+      "eda_breakout_bearish": {
+        "points": -0.5,
+        "description": "H5 calibrated weight for eda_breakout_bearish"
+      },
+      "eda_volume_bullish": {
+        "points": 0.5,
+        "description": "H5 calibrated weight for eda_volume_bullish"
+      },
+      "eda_volatility_bearish": {
+        "points": -0.5,
+        "description": "H5 calibrated weight for eda_volatility_bearish"
+      },
+      "eda_trend_strength": {
+        "points": 0.5,
+        "description": "H5 calibrated weight for eda_trend_strength"
+      },
+      "eda_trend_weakness": {
+        "points": -0.5,
+        "description": "H5 calibrated weight for eda_trend_weakness"
+      }
+    },
+    "20": {
+      "trend_ma50_bullish": {
+        "points": 1.928,
+        "description": "H20 calibrated weight for trend_ma50_bullish"
+      },
+      "trend_ma50_bearish": {
+        "points": -2.0,
+        "description": "H20 calibrated weight for trend_ma50_bearish"
+      },
+      "trend_ma200_bullish": {
+        "points": 1.615,
+        "description": "H20 calibrated weight for trend_ma200_bullish"
+      },
+      "trend_ma200_bearish": {
+        "points": -1.0,
+        "description": "H20 calibrated weight for trend_ma200_bearish"
+      },
+      "rsi_oversold": {
+        "points": 1.411,
+        "description": "H20 calibrated weight for rsi_oversold"
+      },
+      "rsi_healthy": {
+        "points": 1.201,
+        "description": "H20 calibrated weight for rsi_healthy"
+      },
+      "rsi_overbought": {
+        "points": -1.546,
+        "description": "H20 calibrated weight for rsi_overbought"
+      },
+      "sentiment_bullish": {
+        "points": 2.0,
+        "description": "H20 calibrated weight for sentiment_bullish"
+      },
+      "sentiment_bearish": {
+        "points": -2.0,
+        "description": "H20 calibrated weight for sentiment_bearish"
+      },
+      "analyst_buy_strong": {
+        "points": 2.0,
+        "description": "H20 calibrated weight for analyst_buy_strong"
+      },
+      "analyst_buy_weak": {
+        "points": -1.0,
+        "description": "H20 calibrated weight for analyst_buy_weak"
+      },
+      "analyst_upside": {
+        "points": 1.0,
+        "description": "H20 calibrated weight for analyst_upside"
+      },
+      "analyst_downside": {
+        "points": -1.0,
+        "description": "H20 calibrated weight for analyst_downside"
+      },
+      "momentum_strong_up": {
+        "points": 1.324,
+        "description": "H20 calibrated weight for momentum_strong_up"
+      },
+      "momentum_strong_down": {
+        "points": -0.993,
+        "description": "H20 calibrated weight for momentum_strong_down"
+      },
+      "macd_bullish": {
+        "points": 1.372,
+        "description": "H20 calibrated weight for macd_bullish"
+      },
+      "macd_bearish": {
+        "points": -1.0,
+        "description": "H20 calibrated weight for macd_bearish"
+      },
+      "bb_oversold": {
+        "points": 1.151,
+        "description": "H20 calibrated weight for bb_oversold"
+      },
+      "bb_overbought": {
+        "points": -1.172,
+        "description": "H20 calibrated weight for bb_overbought"
+      },
+      "kdj_oversold": {
+        "points": 2.0,
+        "description": "H20 calibrated weight for kdj_oversold"
+      },
+      "kdj_overbought": {
+        "points": -1.286,
+        "description": "H20 calibrated weight for kdj_overbought"
+      },
+      "obv_bullish": {
+        "points": 1.299,
+        "description": "H20 calibrated weight for obv_bullish"
+      },
+      "obv_bearish": {
+        "points": -1.0,
+        "description": "H20 calibrated weight for obv_bearish"
+      },
+      "vwap_above": {
+        "points": 1.134,
+        "description": "H20 calibrated weight for vwap_above"
+      },
+      "vwap_below": {
+        "points": -1.0,
+        "description": "H20 calibrated weight for vwap_below"
+      },
+      "macro_risk_bearish": {
+        "points": -1.0,
+        "description": "H20 calibrated weight for macro_risk_bearish"
+      },
+      "macro_risk_bullish": {
+        "points": 0.5,
+        "description": "H20 calibrated weight for macro_risk_bullish"
+      },
+      "macro_sentiment_bearish": {
+        "points": -0.5,
+        "description": "H20 calibrated weight for macro_sentiment_bearish"
+      },
+      "macro_sentiment_bullish": {
+        "points": 0.5,
+        "description": "H20 calibrated weight for macro_sentiment_bullish"
+      },
+      "macro_sector_headwind": {
+        "points": -0.5,
+        "description": "H20 calibrated weight for macro_sector_headwind"
+      },
+      "eda_breakout_bullish": {
+        "points": 0.5,
+        "description": "H20 calibrated weight for eda_breakout_bullish"
+      },
+      "eda_breakout_bearish": {
+        "points": -0.5,
+        "description": "H20 calibrated weight for eda_breakout_bearish"
+      },
+      "eda_volume_bullish": {
+        "points": 0.5,
+        "description": "H20 calibrated weight for eda_volume_bullish"
+      },
+      "eda_volatility_bearish": {
+        "points": -0.5,
+        "description": "H20 calibrated weight for eda_volatility_bearish"
+      },
+      "eda_trend_strength": {
+        "points": 0.5,
+        "description": "H20 calibrated weight for eda_trend_strength"
+      },
+      "eda_trend_weakness": {
+        "points": -0.5,
+        "description": "H20 calibrated weight for eda_trend_weakness"
+      }
+    },
+    "60": {
+      "trend_ma50_bullish": {
+        "points": 1.619,
+        "description": "H60 calibrated weight for trend_ma50_bullish"
+      },
+      "trend_ma50_bearish": {
+        "points": -2.0,
+        "description": "H60 calibrated weight for trend_ma50_bearish"
+      },
+      "trend_ma200_bullish": {
+        "points": 2.0,
+        "description": "H60 calibrated weight for trend_ma200_bullish"
+      },
+      "trend_ma200_bearish": {
+        "points": -1.0,
+        "description": "H60 calibrated weight for trend_ma200_bearish"
+      },
+      "rsi_oversold": {
+        "points": 1.028,
+        "description": "H60 calibrated weight for rsi_oversold"
+      },
+      "rsi_healthy": {
+        "points": 1.084,
+        "description": "H60 calibrated weight for rsi_healthy"
+      },
+      "rsi_overbought": {
+        "points": -1.371,
+        "description": "H60 calibrated weight for rsi_overbought"
+      },
+      "sentiment_bullish": {
+        "points": 2.0,
+        "description": "H60 calibrated weight for sentiment_bullish"
+      },
+      "sentiment_bearish": {
+        "points": -2.0,
+        "description": "H60 calibrated weight for sentiment_bearish"
+      },
+      "analyst_buy_strong": {
+        "points": 2.0,
+        "description": "H60 calibrated weight for analyst_buy_strong"
+      },
+      "analyst_buy_weak": {
+        "points": -1.0,
+        "description": "H60 calibrated weight for analyst_buy_weak"
+      },
+      "analyst_upside": {
+        "points": 1.0,
+        "description": "H60 calibrated weight for analyst_upside"
+      },
+      "analyst_downside": {
+        "points": -1.0,
+        "description": "H60 calibrated weight for analyst_downside"
+      },
+      "momentum_strong_up": {
+        "points": 0.664,
+        "description": "H60 calibrated weight for momentum_strong_up"
+      },
+      "momentum_strong_down": {
+        "points": -0.858,
+        "description": "H60 calibrated weight for momentum_strong_down"
+      },
+      "macd_bullish": {
+        "points": 1.448,
+        "description": "H60 calibrated weight for macd_bullish"
+      },
+      "macd_bearish": {
+        "points": -1.0,
+        "description": "H60 calibrated weight for macd_bearish"
+      },
+      "bb_oversold": {
+        "points": 1.008,
+        "description": "H60 calibrated weight for bb_oversold"
+      },
+      "bb_overbought": {
+        "points": -0.789,
+        "description": "H60 calibrated weight for bb_overbought"
+      },
+      "kdj_oversold": {
+        "points": 1.027,
+        "description": "H60 calibrated weight for kdj_oversold"
+      },
+      "kdj_overbought": {
+        "points": -0.946,
+        "description": "H60 calibrated weight for kdj_overbought"
+      },
+      "obv_bullish": {
+        "points": 1.373,
+        "description": "H60 calibrated weight for obv_bullish"
+      },
+      "obv_bearish": {
+        "points": -1.0,
+        "description": "H60 calibrated weight for obv_bearish"
+      },
+      "vwap_above": {
+        "points": 1.272,
+        "description": "H60 calibrated weight for vwap_above"
+      },
+      "vwap_below": {
+        "points": -1.0,
+        "description": "H60 calibrated weight for vwap_below"
+      },
+      "macro_risk_bearish": {
+        "points": -1.0,
+        "description": "H60 calibrated weight for macro_risk_bearish"
+      },
+      "macro_risk_bullish": {
+        "points": 0.5,
+        "description": "H60 calibrated weight for macro_risk_bullish"
+      },
+      "macro_sentiment_bearish": {
+        "points": -0.5,
+        "description": "H60 calibrated weight for macro_sentiment_bearish"
+      },
+      "macro_sentiment_bullish": {
+        "points": 0.5,
+        "description": "H60 calibrated weight for macro_sentiment_bullish"
+      },
+      "macro_sector_headwind": {
+        "points": -0.5,
+        "description": "H60 calibrated weight for macro_sector_headwind"
+      },
+      "eda_breakout_bullish": {
+        "points": 0.5,
+        "description": "H60 calibrated weight for eda_breakout_bullish"
+      },
+      "eda_breakout_bearish": {
+        "points": -0.5,
+        "description": "H60 calibrated weight for eda_breakout_bearish"
+      },
+      "eda_volume_bullish": {
+        "points": 0.5,
+        "description": "H60 calibrated weight for eda_volume_bullish"
+      },
+      "eda_volatility_bearish": {
+        "points": -0.5,
+        "description": "H60 calibrated weight for eda_volatility_bearish"
+      },
+      "eda_trend_strength": {
+        "points": 0.5,
+        "description": "H60 calibrated weight for eda_trend_strength"
+      },
+      "eda_trend_weakness": {
+        "points": -0.5,
+        "description": "H60 calibrated weight for eda_trend_weakness"
+      }
+    }
+  },
+  "feature_importance": {
+    "ret_20d": 1.473181128501892,
+    "kdj_overbought": 1.1854257782300313,
+    "momentum_up": 1.0344604849815369,
+    "volume_shock": 0.8308353026707967,
+    "drawdown_60": 1.7408875624338787,
+    "kdj_oversold": 1.4692887862523396,
+    "ma20_slope_5": 1.6590553522109985,
+    "rsi_overbought": 1.6115840276082356,
+    "volatility_zscore": 1.755235989888509,
+    "obv_bullish": 1.3488009770711262,
+    "volatility_high": 1.4734323422114055,
+    "volume_ratio_20": 1.061770498752594,
+    "momentum_down": 0.9413987199465433,
+    "rsi_oversold": 1.2474872668584187,
+    "ret_5d": 1.284893790880839,
+    "trend_persistence_10": 1.4157214164733887,
+    "rsi_healthy": 1.1814265251159668,
+    "bb_oversold": 1.1589218775431316,
+    "price_gt_ma200": 1.6554736693700154,
+    "bb_overbought": 1.0175393223762512,
+    "macd_bullish": 1.4648449023564656,
+    "price_gt_vwap": 1.2523152430852253,
+    "price_gt_ma50": 1.8491754531860352,
+    "ma50_slope_10": 1.7955279350280762
+  },
+  "feature_importance_by_horizon": {
+    "5": {
+      "price_gt_ma50": 2.0,
+      "price_gt_ma200": 1.3513169288635254,
+      "rsi_oversold": 1.3026403188705444,
+      "rsi_healthy": 1.2596975564956665,
+      "rsi_overbought": 1.9173431396484375,
+      "macd_bullish": 1.574613094329834,
+      "bb_oversold": 1.3177510499954224,
+      "bb_overbought": 1.0917900800704956,
+      "kdj_oversold": 1.380768895149231,
+      "kdj_overbought": 1.3243913650512695,
+      "obv_bullish": 1.3741154670715332,
+      "price_gt_vwap": 1.3516210317611694,
+      "momentum_up": 1.1158186197280884,
+      "momentum_down": 0.9733867049217224,
+      "volatility_high": 1.2564996480941772,
+      "ret_5d": 1.3911086320877075,
+      "ret_20d": 1.4742350578308105,
+      "ma20_slope_5": 1.5283420085906982,
+      "ma50_slope_10": 1.5553336143493652,
+      "volatility_zscore": 1.5958532094955444,
+      "volume_ratio_20": 1.2019237279891968,
+      "volume_shock": 0.9899235963821411,
+      "drawdown_60": 1.5357977151870728,
+      "trend_persistence_10": 1.384393334388733
+    },
+    "20": {
+      "price_gt_ma50": 1.9281532764434814,
+      "price_gt_ma200": 1.615104079246521,
+      "rsi_oversold": 1.4113924503326416,
+      "rsi_healthy": 1.200659990310669,
+      "rsi_overbought": 1.5459643602371216,
+      "macd_bullish": 1.3716689348220825,
+      "bb_oversold": 1.1506409645080566,
+      "bb_overbought": 1.1719800233840942,
+      "kdj_oversold": 2.0,
+      "kdj_overbought": 1.285906195640564,
+      "obv_bullish": 1.2989557981491089,
+      "price_gt_vwap": 1.133540153503418,
+      "momentum_up": 1.3238377571105957,
+      "momentum_down": 0.9927411675453186,
+      "volatility_high": 1.2763116359710693,
+      "ret_5d": 1.2772554159164429,
+      "ret_20d": 1.4730098247528076,
+      "ma20_slope_5": 1.780011534690857,
+      "ma50_slope_10": 1.9220952987670898,
+      "volatility_zscore": 1.7792210578918457,
+      "volume_ratio_20": 0.997921347618103,
+      "volume_shock": 0.37585973739624023,
+      "drawdown_60": 1.78197181224823,
+      "trend_persistence_10": 1.3040200471878052
+    },
+    "60": {
+      "price_gt_ma50": 1.619373083114624,
+      "price_gt_ma200": 2.0,
+      "rsi_oversold": 1.0284290313720703,
+      "rsi_healthy": 1.083922028541565,
+      "rsi_overbought": 1.371444582939148,
+      "macd_bullish": 1.4482526779174805,
+      "bb_oversold": 1.0083736181259155,
+      "bb_overbought": 0.7888478636741638,
+      "kdj_oversold": 1.027097463607788,
+      "kdj_overbought": 0.9459797739982605,
+      "obv_bullish": 1.3733316659927368,
+      "price_gt_vwap": 1.2717845439910889,
+      "momentum_up": 0.6637250781059265,
+      "momentum_down": 0.8580682873725891,
+      "volatility_high": 1.8874857425689697,
+      "ret_5d": 1.1863173246383667,
+      "ret_20d": 1.472298502922058,
+      "ma20_slope_5": 1.6688125133514404,
+      "ma50_slope_10": 1.9091548919677734,
+      "volatility_zscore": 1.8906337022781372,
+      "volume_ratio_20": 0.9854664206504822,
+      "volume_shock": 1.1267225742340088,
+      "drawdown_60": 1.904893159866333,
+      "trend_persistence_10": 1.558750867843628
+    }
+  },
+  "horizon_metrics": {
+    "5": {
+      "accuracy": 0.5772,
+      "f1_score": 0.3006961348828032,
+      "auc": 0.502235979786762,
+      "pr_auc": 0.2967810110372341,
+      "folds": 5,
+      "samples": 6000
+    },
+    "20": {
+      "accuracy": 0.6058,
+      "f1_score": 0.30432011744784765,
+      "auc": 0.5128261696267287,
+      "pr_auc": 0.2868540357576779,
+      "folds": 5,
+      "samples": 6000
+    },
+    "60": {
+      "accuracy": 0.5566,
+      "f1_score": 0.34612965987498595,
+      "auc": 0.5170650239440878,
+      "pr_auc": 0.32307913912032044,
+      "folds": 5,
+      "samples": 6000
     }
   },
   "calibration_notes": {
-    "data_sources": ["Alpha Vantage (price)", "Finnhub (news, analyst, fundamentals)"],
-    "target_variable": "5-day forward return > 2% (binary classification)",
-    "model_type": "XGBoost classifier with StandardScaler",
-    "feature_count": 12,
-    "historical_symbols": [],
-    "next_steps": [
-      "Collect 2+ years of historical data for 10-20 symbols",
-      "Run: python backend/scripts/signal-calibration.py --symbols AAPL,MSFT,GOOGL,NVDA,... --days 500",
-      "Review metrics (Accuracy, F1, AUC) and update weights",
-      "A/B test new weights against hardcoded baseline",
-      "Consider market regime (bull/bear/sideways) for weight adjustments"
-    ]
+    "data_sources": [
+      "Yahoo Finance",
+      "Alpha Vantage fallback"
+    ],
+    "target_variable": "Forward return threshold varies by horizon (5d=2%, 20d=5%, 60d=8%)",
+    "model_type": "XGBoost classifier with StandardScaler + TimeSeriesSplit CV",
+    "feature_count": 24,
+    "historical_symbols": [
+      "MSB.AX",
+      "CBA.AX",
+      "WEB.AX",
+      "BHP.AX",
+      "PNV.AX",
+      "TPW.AX",
+      "WBC.AX",
+      "CSL.AX"
+    ],
+    "horizons_days": [
+      5,
+      20,
+      60
+    ],
+    "cv_splits": 5,
+    "blend_weights": {
+      "SHORT": 0.3,
+      "MEDIUM": 0.4,
+      "LONG": 0.3
+    },
+    "class_imbalance_handling": "Per-fold scale_pos_weight = negatives/positives"
   }
 }
