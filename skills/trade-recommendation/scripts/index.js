@@ -613,6 +613,30 @@ function computeConfidence(score, signals = [], macroRisk = 'MEDIUM') {
   };
 }
 
+function buildFallbackConfidenceExplanation({ action, confidence, confidenceBreakdown }) {
+  const alignment = Number(confidenceBreakdown?.alignment || 0);
+  const macroAdj = Number(confidenceBreakdown?.macroAdjustment || 0);
+  const conflict = Number(confidenceBreakdown?.conflictPenalty || 0);
+  const tone = confidence >= 70 ? 'high' : confidence >= 50 ? 'moderate' : 'cautious';
+  const alignmentText = alignment >= 65 ? 'signal alignment is strong' : alignment <= 40 ? 'signals are mixed' : 'signals are moderately aligned';
+  const macroText = macroAdj < 0 ? 'macro risk reduced conviction' : macroAdj > 0 ? 'macro regime supports conviction' : 'macro impact is neutral';
+  const conflictText = conflict < 0 ? 'and conflict penalties applied' : '';
+  return `${action} carries ${tone} conviction (${confidence}%) because ${alignmentText}; ${macroText} ${conflictText}`.trim();
+}
+
+async function generateConfidenceExplanation({ llm, ticker, action, confidence, confidenceBreakdown, signals }) {
+  const fallback = buildFallbackConfidenceExplanation({ action, confidence, confidenceBreakdown });
+  try {
+    const systemPrompt = 'You are a quantitative analyst. Write one concise sentence (max 24 words) explaining confidence. No markdown.';
+    const userMessage = `Ticker=${ticker}; Action=${action}; Confidence=${confidence}; Alignment=${confidenceBreakdown?.alignment}; Positive=${confidenceBreakdown?.positiveMagnitude}; Negative=${confidenceBreakdown?.negativeMagnitude}; MacroAdj=${confidenceBreakdown?.macroAdjustment}; Conflict=${confidenceBreakdown?.conflictPenalty}; SignalCount=${signals.length}.`;
+    const text = await llm(systemPrompt, userMessage);
+    const cleaned = String(text || '').replace(/\s+/g, ' ').replace(/```/g, '').trim();
+    return cleaned || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile) {
   const macro = marketData?.macroContext || {};
   const macroSentence = macro.available
@@ -685,6 +709,14 @@ async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = '
     llmRecommendation = buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile);
   }
   llmRecommendation.timeHorizon = normalizedTimeHorizon;
+  const confidenceExplanation = await generateConfidenceExplanation({
+    llm,
+    ticker: marketData.ticker,
+    action,
+    confidence,
+    confidenceBreakdown,
+    signals,
+  });
 
   // Historical pattern matching
   const historicalPatterns = findHistoricalPatterns(marketData.priceHistory, marketData);
@@ -699,6 +731,7 @@ async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = '
       action,
       actionColor,
       confidence,
+      confidenceExplanation,
       confidenceBreakdown,
       score,
       signals,

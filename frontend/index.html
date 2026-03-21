@@ -326,10 +326,18 @@
   .ticker-change { font-size: 13px; font-family: var(--mono); margin-top: 2px; }
   .ticker-change.up { color: var(--green); }
   .ticker-change.down { color: var(--red); }
-  .ticker-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
-  .stat-item { display: flex; flex-direction: column; gap: 3px; }
-  .stat-label { font-size: 10px; color: var(--text3); font-family: var(--mono); }
-  .stat-value { font-size: 13px; font-weight: 500; font-family: var(--mono); }
+  .ticker-stats {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-rows: auto auto;
+    column-gap: 10px;
+    row-gap: 6px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .stat-label { font-size: 10px; color: var(--text3); font-family: var(--mono); white-space: nowrap; }
+  .stat-value { font-size: 13px; font-weight: 500; font-family: var(--mono); white-space: nowrap; }
 
   /* ── Intelligence cards ── */
   .intel-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -483,6 +491,38 @@
     box-shadow: var(--shadow-md);
   }
   .chart-full .chart-canvas-wrap { height: 200px; }
+  .news-heatmap-summary { font-size: 10px; font-family: var(--mono); color: var(--text3); margin-bottom: 8px; }
+  .news-heatmap-summary strong { color: var(--text); font-weight: 500; }
+  .news-heatmap {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+    gap: 6px;
+  }
+  .news-heatmap-cell {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    font-size: 10px;
+    font-family: var(--mono);
+    color: var(--text);
+    cursor: pointer;
+    transition: var(--transition);
+  }
+  .news-heatmap-cell:hover {
+    border-color: rgba(0,212,255,0.32);
+    transform: translateY(-1px);
+  }
+  .news-heatmap-hover {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--text2);
+    min-height: 32px;
+    line-height: 1.4;
+  }
 
   /* ── EDA Insights ── */
   .insight-list { display: flex; flex-direction: column; gap: 8px; }
@@ -1647,6 +1687,7 @@ function renderBacktestReport(report, panel) {
 // RENDER: Market Intelligence
 // ─────────────────────────────────────────
 function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFallback = false, fallbackReason = null) {
+  const normalizedDataSource = String(dataSource || '').toLowerCase();
   const changeClass = d.changePercent >= 0 ? 'up' : 'down';
   const changeSign = d.changePercent >= 0 ? '+' : '';
 
@@ -1663,7 +1704,7 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   const isMockSource = (source) => /mock/i.test(String(source || ''));
   const nonShortKeys = ['price', 'technicals', 'news', 'macro'];
   const hasNonShortMock = nonShortKeys.some((key) => isMockSource(sourceBreakdown[key]));
-  const suppressShortOnlyMockHeadline = dataSource !== 'mock' && !hasNonShortMock;
+  const suppressShortOnlyMockHeadline = normalizedDataSource !== 'mock' && !hasNonShortMock;
   const showMockHeadline = usedFallback && !suppressShortOnlyMockHeadline;
 
   // Data source banner
@@ -1679,7 +1720,7 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
       </div>
     `;
     panel.appendChild(banner);
-  } else if (dataSource === 'alpha-vantage') {
+  } else if (normalizedDataSource === 'alpha-vantage') {
     const banner = document.createElement('div');
     banner.className = 'fade-in';
     banner.style.cssText = 'background:rgba(16,232,152,0.1);border:1px solid rgba(16,232,152,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px';
@@ -1687,11 +1728,11 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
       <span style="font-size:16px">✓</span>
       <div style="flex:1">
         <div style="font-size:12px;font-weight:500;color:var(--green)">Live Market Data</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">Real-time data from Alpha Vantage</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">Real-time data from Finnhub, Yahoo, Alpha</div>
       </div>
     `;
     panel.appendChild(banner);
-  } else if (dataSource === 'yahoo-finance') {
+  } else if (normalizedDataSource === 'yahoo-finance') {
     const banner = document.createElement('div');
     banner.className = 'fade-in';
     banner.style.cssText = 'background:rgba(16,232,152,0.1);border:1px solid rgba(16,232,152,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px';
@@ -1699,7 +1740,31 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
       <span style="font-size:16px">✓</span>
       <div style="flex:1">
         <div style="font-size:12px;font-weight:500;color:var(--green)">Live Market Data</div>
-        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">Real-time data from Yahoo Finance</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">Real-time data from Finnhub, Yahoo, Alpha</div>
+      </div>
+    `;
+    panel.appendChild(banner);
+  } else if (normalizedDataSource === 'finnhub') {
+    const banner = document.createElement('div');
+    banner.className = 'fade-in';
+    banner.style.cssText = 'background:rgba(16,232,152,0.1);border:1px solid rgba(16,232,152,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px';
+    banner.innerHTML = `
+      <span style="font-size:16px">✓</span>
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:500;color:var(--green)">Live Market Data</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">Real-time data from Finnhub, Yahoo, Alpha</div>
+      </div>
+    `;
+    panel.appendChild(banner);
+  } else if (normalizedDataSource === 'alpha-vantage-history') {
+    const banner = document.createElement('div');
+    banner.className = 'fade-in';
+    banner.style.cssText = 'background:rgba(0,212,255,0.1);border:1px solid rgba(0,212,255,0.25);border-radius:var(--radius);padding:12px 14px;margin-bottom:16px;display:flex;align-items:center;gap:10px';
+    banner.innerHTML = `
+      <span style="font-size:16px">ℹ</span>
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:500;color:var(--cyan)">Live Market Data</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)">Real-time data from Finnhub, Yahoo, Alpha</div>
       </div>
     `;
     panel.appendChild(banner);
@@ -1721,12 +1786,18 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   if (showMockHeadline) {
     sourceLabel = 'mock data';
     sourceColor = 'var(--amber)';
-  } else if (dataSource === 'alpha-vantage') {
+  } else if (normalizedDataSource === 'alpha-vantage') {
     sourceLabel = 'alpha vantage';
     sourceColor = 'var(--green)';
-  } else if (dataSource === 'yahoo-finance') {
+  } else if (normalizedDataSource === 'yahoo-finance') {
     sourceLabel = 'yahoo finance';
     sourceColor = 'var(--green)';
+  } else if (normalizedDataSource === 'finnhub') {
+    sourceLabel = 'finnhub';
+    sourceColor = 'var(--green)';
+  } else if (normalizedDataSource === 'alpha-vantage-history') {
+    sourceLabel = 'mixed live';
+    sourceColor = 'var(--cyan)';
   }
   
   header.innerHTML = `
@@ -1743,11 +1814,16 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
       </div>
     </div>
     <div class="ticker-stats">
-      <div class="stat-item"><span class="stat-label">52W HIGH</span><span class="stat-value">$${fmtNum(d.high52w)}</span></div>
-      <div class="stat-item"><span class="stat-label">52W LOW</span><span class="stat-value">$${fmtNum(d.low52w)}</span></div>
-      <div class="stat-item"><span class="stat-label">P/E RATIO</span><span class="stat-value">${d.pe}x</span></div>
-      <div class="stat-item"><span class="stat-label">EPS</span><span class="stat-value">$${d.eps}</span></div>
-      <div class="stat-item"><span class="stat-label">SHORT %</span><span class="stat-value">${Number.isFinite(Number(d.shortMetrics?.shortPercent)) ? `${Number(d.shortMetrics.shortPercent).toFixed(2)}%` : '—'}</span></div>
+      <span class="stat-label">52W HIGH</span>
+      <span class="stat-label">52W LOW</span>
+      <span class="stat-label">P/E RATIO</span>
+      <span class="stat-label">EPS</span>
+      <span class="stat-label">SHORT %</span>
+      <span class="stat-value">$${fmtNum(d.high52w)}</span>
+      <span class="stat-value">$${fmtNum(d.low52w)}</span>
+      <span class="stat-value">${d.pe}x</span>
+      <span class="stat-value">$${d.eps}</span>
+      <span class="stat-value">${Number.isFinite(Number(d.shortMetrics?.shortPercent)) ? `${Number(d.shortMetrics.shortPercent).toFixed(2)}%` : '—'}</span>
     </div>
     ${d.dataSourceBreakdown ? `
     <div style="margin-top:8px;font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.5px">Data Source:</div>
@@ -1868,7 +1944,13 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   // News
   const newsCard = document.createElement('div');
   newsCard.className = 'card fade-in';
-  const newsSource = d.dataSourceBreakdown?.news || 'Unknown';
+  const newsSourceFallbackMap = {
+    'finnhub': 'Finnhub (Real)',
+    'yahoo-finance': 'Yahoo + ASX + Google (Real)',
+    'alpha-vantage': 'Finnhub (Real)',
+    'mock': 'Mock News',
+  };
+  const newsSource = d.dataSourceBreakdown?.news || newsSourceFallbackMap[normalizedDataSource] || 'Unknown';
   const newsSourceColor = newsSource.includes('No news') ? 'var(--text3)' : 'var(--green)';
   newsCard.innerHTML = `
     <div class="card-header"><span class="card-title">Breaking News</span><span style="font-size:9px;color:${newsSourceColor};font-family:var(--mono);margin-left:auto">${newsSource}</span></div>
@@ -1892,6 +1974,37 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
 // RENDER: EDA
 // ─────────────────────────────────────────
 function renderEDA(charts, edaInsights, marketData, panel) {
+  const priceHistoryPoints = Array.isArray(marketData.priceHistory) ? marketData.priceHistory.length : 0;
+  const rawHistorySource = String(marketData.priceHistorySource || marketData.dataSource || 'unknown').toLowerCase();
+  const historySourceLabelMap = {
+    'finnhub': 'Finnhub',
+    'yahoo-finance-history': 'Yahoo Finance',
+    'yahoo-finance': 'Yahoo Finance',
+    'alpha-vantage-history': 'Alpha Vantage',
+    'alpha-vantage': 'Alpha Vantage',
+    'mock-history': 'Mock',
+    'mock': 'Mock',
+  };
+  const historySourceLabel = historySourceLabelMap[rawHistorySource] || marketData.priceHistorySource || marketData.dataSource || 'Unknown';
+  const sentimentNews = Array.isArray(marketData.news) ? marketData.news : [];
+  const overallSentiment = sentimentNews.length
+    ? sentimentNews.reduce((sum, item) => sum + Number(item.sentiment || 0), 0) / sentimentNews.length
+    : 0;
+  const overallSentimentLabel = overallSentiment > 0.1 ? 'BULLISH' : overallSentiment < -0.1 ? 'BEARISH' : 'NEUTRAL';
+  const escapeHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const sentimentCellBackground = (value) => {
+    const score = Number.isFinite(Number(value)) ? Number(value) : 0;
+    const intensity = Math.min(0.9, 0.25 + Math.abs(score) * 0.55);
+    return score >= 0
+      ? `rgba(16,185,129,${intensity.toFixed(2)})`
+      : `rgba(239,68,68,${intensity.toFixed(2)})`;
+  };
+
   const fmtLegendNum = (value) => Number.isFinite(Number(value))
     ? Number(value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : '—';
@@ -1942,6 +2055,7 @@ function renderEDA(charts, edaInsights, marketData, panel) {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
       <div class="chart-title-group">
         <div class="chart-title" style="margin-bottom:0">${marketData.ticker} — Candlestick &amp; Volume · up to 2Y</div>
+        <div style="font-size:10px;color:var(--text3);font-family:var(--mono)">History Source: ${historySourceLabel} · Points: ${priceHistoryPoints}</div>
         <div class="chart-legend">
           <span class="chart-legend-item"><span class="chart-legend-swatch candle"></span>Price Candles</span>
           <span class="chart-legend-item"><span class="chart-legend-swatch volume"></span>Volume</span>
@@ -2079,14 +2193,33 @@ function renderEDA(charts, edaInsights, marketData, panel) {
   chartGrid.className = 'chart-grid fade-in';
   chartGrid.innerHTML = `
     <div class="chart-wrap"><div class="chart-title">${charts.analystChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-analyst"></canvas></div></div>
-    <div class="chart-wrap"><div class="chart-title">${charts.sentimentChart.title}</div><div class="chart-canvas-wrap"><canvas id="chart-sentiment"></canvas></div></div>
+    <div class="chart-wrap">
+      <div class="chart-title">${marketData.ticker} - News Sentiment Heatmap</div>
+      <div class="news-heatmap-summary">Overall Sentiment: <strong style="color:${overallSentiment > 0.1 ? 'var(--green)' : overallSentiment < -0.1 ? 'var(--red)' : 'var(--amber)'}">${overallSentiment > 0 ? '+' : ''}${overallSentiment.toFixed(2)} (${overallSentimentLabel})</strong></div>
+      <div class="news-heatmap" id="news-heatmap">
+        ${sentimentNews.length > 0 ? sentimentNews.map((item, index) => {
+          const score = Number(item.sentiment || 0);
+          return `<button type="button" class="news-heatmap-cell" data-index="${index}" style="background:${sentimentCellBackground(score)}">${score > 0 ? '+' : ''}${score.toFixed(2)}</button>`;
+        }).join('') : `<div class="news-heatmap-hover" style="grid-column:1/-1;margin-top:0">No news sentiment data available.</div>`}
+      </div>
+      <div class="news-heatmap-hover" id="news-heatmap-hover">Hover a cell to view headline and sentiment score.</div>
+    </div>
   `;
   panel.appendChild(chartGrid);
   setTimeout(() => {
     const ctxA = document.getElementById('chart-analyst').getContext('2d');
     currentCharts['analyst'] = new Chart(ctxA, { type: 'doughnut', data: charts.analystChart.data, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#7a8fb8', font: { size: 10, family: "'DM Mono', monospace" }, boxWidth: 10, padding: 6 } } }, cutout: '65%' } });
-    const ctxS = document.getElementById('chart-sentiment').getContext('2d');
-    currentCharts['sentiment'] = new Chart(ctxS, { type: 'bar', data: charts.sentimentChart.data, options: { ...chartDefaults, plugins: { ...chartDefaults.plugins }, scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: -1, max: 1 } } } });
+    const heatmapHover = document.getElementById('news-heatmap-hover');
+    const heatmapCells = Array.from(document.querySelectorAll('#news-heatmap .news-heatmap-cell'));
+    heatmapCells.forEach((cell) => {
+      cell.addEventListener('mouseenter', () => {
+        const index = Number(cell.getAttribute('data-index'));
+        const item = sentimentNews[index];
+        if (!item || !heatmapHover) return;
+        const score = Number(item.sentiment || 0);
+        heatmapHover.innerHTML = `<strong>${score > 0 ? '+' : ''}${score.toFixed(2)}</strong> · ${escapeHtml(item.title || 'Untitled')} <span style="color:var(--text3)">(${escapeHtml(item.source || 'Unknown')})</span>`;
+      });
+    });
   }, 50);
 
   // RSI gauge (standalone)
@@ -2133,6 +2266,33 @@ function renderRecommendation(rec, panel) {
 
   const rrColor = rec.riskReward >= 2 ? 'var(--green)' : rec.riskReward >= 1.5 ? 'var(--amber)' : 'var(--red)';
   const confidenceBreakdown = rec.confidenceBreakdown || null;
+  const sortedSignals = [...(rec.signals || [])].sort((left, right) => {
+    const leftPoints = Number(left?.points || 0);
+    const rightPoints = Number(right?.points || 0);
+    const leftAbs = Math.abs(leftPoints);
+    const rightAbs = Math.abs(rightPoints);
+    if (rightAbs !== leftAbs) return rightAbs - leftAbs;
+    return rightPoints - leftPoints;
+  });
+  const positiveSignalPower = sortedSignals
+    .filter((signal) => Number(signal?.points || 0) > 0)
+    .reduce((sum, signal) => sum + Number(signal.points || 0), 0);
+  const negativeSignalPower = sortedSignals
+    .filter((signal) => Number(signal?.points || 0) < 0)
+    .reduce((sum, signal) => sum + Math.abs(Number(signal.points || 0)), 0);
+  const totalSignalPower = positiveSignalPower + negativeSignalPower;
+  const positiveSignalPct = totalSignalPower > 0 ? (positiveSignalPower / totalSignalPower) * 100 : 50;
+  const negativeSignalPct = totalSignalPower > 0 ? (negativeSignalPower / totalSignalPower) * 100 : 50;
+  const signalDominance = positiveSignalPct >= 60
+    ? 'Bullish Dominant'
+    : negativeSignalPct >= 60
+      ? 'Bearish Dominant'
+      : 'Balanced';
+  const signalDominanceColor = signalDominance === 'Bullish Dominant'
+    ? 'var(--green)'
+    : signalDominance === 'Bearish Dominant'
+      ? 'var(--red)'
+      : 'var(--amber)';
   const fmtAdj = (v) => {
     const n = Number(v || 0);
     return `${n > 0 ? '+' : ''}${n}`;
@@ -2162,6 +2322,7 @@ function renderRecommendation(rec, panel) {
               <span class="detail-chip"><span>Alignment:</span>${confidenceBreakdown.alignment ?? '—'}%</span>
               <span class="detail-chip"><span>Final:</span>${confidenceBreakdown.final ?? rec.confidence}</span>
             </div>
+            ${rec.confidenceExplanation ? `<div style="margin-top:8px;font-size:12px;line-height:1.5;color:var(--text2)">${rec.confidenceExplanation}</div>` : ''}
           </details>
         ` : ''}
       </div>
@@ -2192,14 +2353,14 @@ function renderRecommendation(rec, panel) {
     ${rec.objectiveProfile?.focus ? `<p style="font-size:13px;line-height:1.65;color:var(--text);margin-top:12px;padding:8px 10px;border-radius:8px;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.18)"><span style="font-family:var(--mono);font-size:11px;letter-spacing:0.06em;text-transform:uppercase;color:var(--cyan);font-weight:600">Objective Focus</span><br><span style="font-weight:600">${rec.objectiveProfile.focus}</span></p>` : ''}
     ${rec.objectiveProfile ? `
       <div style="margin-top:14px">
-        <div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">Why This Lens</div>
+        <div style="font-size:13px;color:var(--cyan);font-family:var(--mono);font-weight:700;margin-bottom:10px;text-transform:uppercase;letter-spacing:0.1em">Why This Lens</div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <div>
-            <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Amplified in this recommendation</div>
+            <div style="font-size:12px;color:var(--text);font-weight:600;margin-bottom:6px">Amplified in this recommendation</div>
             <div class="signal-detail" style="margin-left:0">${(rec.objectiveProfile.amplifiedSignals || []).length ? rec.objectiveProfile.amplifiedSignals.map(name => `<span class="detail-chip"><span>+</span>${name}</span>`).join('') : `<span class="detail-chip"><span>+</span>Balanced weighting</span>`}</div>
           </div>
           <div>
-            <div style="font-size:11px;color:var(--text2);margin-bottom:6px">De-emphasized in this recommendation</div>
+            <div style="font-size:12px;color:var(--text);font-weight:600;margin-bottom:6px">De-emphasized in this recommendation</div>
             <div class="signal-detail" style="margin-left:0">${(rec.objectiveProfile.deemphasizedSignals || []).length ? rec.objectiveProfile.deemphasizedSignals.map(name => `<span class="detail-chip"><span>-</span>${name}</span>`).join('') : `<span class="detail-chip"><span>-</span>No major de-emphasis</span>`}</div>
           </div>
         </div>
@@ -2209,8 +2370,20 @@ function renderRecommendation(rec, panel) {
 
     <div style="margin-top:16px">
       <div style="font-size:11px;color:var(--text3);font-family:var(--mono);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.08em">Signal Breakdown</div>
+      <div style="margin-bottom:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;font-family:var(--mono);margin-bottom:6px;color:var(--text3)">
+          <span style="color:var(--green)">Positive ${positiveSignalPower > 0 ? '+' : ''}${positiveSignalPower.toFixed(1)}</span>
+          <span>Signal Tug-of-War</span>
+          <span style="color:var(--red)">Negative -${negativeSignalPower.toFixed(1)}</span>
+        </div>
+        <div style="height:10px;border-radius:999px;overflow:hidden;display:flex;background:rgba(255,255,255,0.05)">
+          <div style="width:${positiveSignalPct.toFixed(1)}%;background:rgba(16,232,152,0.75)"></div>
+          <div style="width:${negativeSignalPct.toFixed(1)}%;background:rgba(255,75,110,0.75)"></div>
+        </div>
+        <div style="margin-top:7px;font-size:11px;font-family:var(--mono);font-weight:600;color:${signalDominanceColor}">${signalDominance}</div>
+      </div>
       <div class="signal-grid">
-        ${(rec.signals || []).map(s => `
+        ${sortedSignals.map(s => `
           <div>
             <div class="signal-row">
               <span class="signal-pts ${s.points > 0 ? 'pos' : 'neg'}">${s.points > 0 ? '+' : ''}${s.points}</span>

@@ -1,11 +1,48 @@
 const { callLlm } = require('./llm');
 
 async function routeChatMessage({ message, history = [] }) {
+  const parseTimeHorizon = (raw) => {
+    const lower = String(raw || '').toLowerCase();
+    if (/short|swing|day trade|intraday|near term|near-term|短线|短期|波段|8周|八周|两个月内/.test(lower)) return 'SHORT';
+    if (/long|long term|long-term|invest|retirement|中长线|长线|长期|基本面|价值|半年|一年|长期持有/.test(lower)) return 'LONG';
+    return 'MEDIUM';
+  };
+
+  const extractTickers = (raw) => {
+    const upper = String(raw || '').toUpperCase();
+    const matches = upper.match(/\b([A-Z0-9]{1,6}(?:\.[A-Z]{1,3})?)\b/g) || [];
+    const banned = new Set([
+      'I', 'A', 'AN', 'THE', 'AND', 'OR', 'TO', 'FOR', 'OF', 'IN', 'ON', 'AT', 'WITH',
+      'BUY', 'SELL', 'HOLD', 'CHECK', 'LOOK', 'WHAT', 'ABOUT', 'SHOULD', 'IS', 'ARE',
+      'PORTFOLIO', 'OPTIMIZE', 'OPTIMISE', 'REBALANCE', 'ALLOCATE', 'ANALYZE', 'ANALYSE',
+      'SHORT', 'MEDIUM', 'LONG', 'TERM', 'MY', 'ME', 'PLEASE', 'NOW', 'LAST', 'PAST'
+    ]);
+    const unique = [];
+    for (const candidate of matches) {
+      if (!banned.has(candidate) && !unique.includes(candidate)) unique.push(candidate);
+    }
+    return unique;
+  };
+
   const parseDateRange = (raw) => {
     const text = String(raw || '');
     const matches = text.match(/\b\d{4}-\d{2}-\d{2}\b/g) || [];
     if (matches.length >= 2) {
       return { startDate: matches[0], endDate: matches[1] };
+    }
+
+    const relative = text.match(/(?:last|past|for)\s+(\d+)\s*(day|days|week|weeks|month|months|year|years)\b/i);
+    if (relative) {
+      const amount = Math.max(1, Number(relative[1]) || 1);
+      const unit = String(relative[2] || '').toLowerCase();
+      const end = new Date();
+      const start = new Date(end);
+      if (unit.startsWith('day')) start.setDate(start.getDate() - amount);
+      else if (unit.startsWith('week')) start.setDate(start.getDate() - amount * 7);
+      else if (unit.startsWith('month')) start.setMonth(start.getMonth() - amount);
+      else if (unit.startsWith('year')) start.setFullYear(start.getFullYear() - amount);
+      const fmt = (d) => d.toISOString().split('T')[0];
+      return { startDate: fmt(start), endDate: fmt(end) };
     }
 
     const end = new Date();
@@ -20,6 +57,38 @@ async function routeChatMessage({ message, history = [] }) {
     if (/macd.?bb/.test(lower)) return 'macd-bb';
     if (/rsi.?ma/.test(lower)) return 'rsi-ma';
     return 'trade-recommendation';
+  };
+
+  const hydrateRoutingResult = (result, rawMessage) => {
+    const safe = result && typeof result === 'object' ? { ...result } : {};
+    const text = String(rawMessage || '');
+    const tickers = extractTickers(text);
+
+    if (safe.action === 'RUN_BACKTEST') {
+      if (!safe.ticker && tickers.length) safe.ticker = tickers[0];
+      if (!safe.strategyName) safe.strategyName = parseBacktestStrategy(text);
+      if (!safe.timeHorizon) safe.timeHorizon = parseTimeHorizon(text);
+      if (!safe.startDate || !safe.endDate) {
+        const range = parseDateRange(text);
+        if (!safe.startDate) safe.startDate = range.startDate;
+        if (!safe.endDate) safe.endDate = range.endDate;
+      }
+      if (!Array.isArray(safe.skillSequence)) safe.skillSequence = ['backtesting'];
+    }
+
+    if (safe.action === 'ANALYZE_STOCK') {
+      if (!safe.ticker && tickers.length) safe.ticker = tickers[0];
+      if (!safe.timeHorizon) safe.timeHorizon = parseTimeHorizon(text);
+      if (!Array.isArray(safe.skillSequence)) safe.skillSequence = ['market-intelligence', 'eda-visual-analysis', 'trade-recommendation'];
+    }
+
+    if (safe.action === 'OPTIMIZE_PORTFOLIO') {
+      if ((!Array.isArray(safe.tickers) || !safe.tickers.length) && tickers.length >= 2) safe.tickers = tickers;
+      if (!safe.timeHorizon) safe.timeHorizon = parseTimeHorizon(text);
+      if (!Array.isArray(safe.skillSequence)) safe.skillSequence = ['portfolio-optimization'];
+    }
+
+    return safe;
   };
 
   const systemPrompt = `You are QuantBot, a quantitative analysis assistant.
@@ -63,31 +132,8 @@ If a field is unknown, set it to null. Keep message concise and professional.`;
       maxTokens: 500,
     });
     const cleaned = String(content || '').replace(/```json|```/g, '').trim();
-    return JSON.parse(cleaned);
+    return hydrateRoutingResult(JSON.parse(cleaned), message);
   } catch {
-    const parseTimeHorizon = (raw) => {
-      const lower = String(raw || '').toLowerCase();
-      if (/short|swing|day trade|intraday|near term|near-term|短线|短期|波段|8周|八周|两个月内/.test(lower)) return 'SHORT';
-      if (/long|long term|long-term|invest|retirement|中长线|长线|长期|基本面|价值|半年|一年|长期持有/.test(lower)) return 'LONG';
-      return 'MEDIUM';
-    };
-
-    const extractTickers = (raw) => {
-      const upper = String(raw || '').toUpperCase();
-      const matches = upper.match(/\b([A-Z0-9]{1,6}(?:\.[A-Z]{1,3})?)\b/g) || [];
-      const banned = new Set([
-        'I', 'A', 'AN', 'THE', 'AND', 'OR', 'TO', 'FOR', 'OF', 'IN', 'ON', 'AT', 'WITH',
-        'BUY', 'SELL', 'HOLD', 'CHECK', 'LOOK', 'WHAT', 'ABOUT', 'SHOULD', 'IS', 'ARE',
-        'PORTFOLIO', 'OPTIMIZE', 'OPTIMISE', 'REBALANCE', 'ALLOCATE', 'ANALYZE', 'ANALYSE',
-        'SHORT', 'MEDIUM', 'LONG', 'TERM', 'MY', 'ME', 'PLEASE', 'NOW'
-      ]);
-      const unique = [];
-      for (const m of matches) {
-        if (!banned.has(m) && !unique.includes(m)) unique.push(m);
-      }
-      return unique;
-    };
-
     // Fallback: extract ticker from message
     // Matches: US tickers (AAPL, TSLA, CBA), international (CBA.AX, 7203.T, HSBA.L), NASDAQ/NYSE codes
     const msg = String(message || '').toUpperCase().trim();

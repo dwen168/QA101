@@ -85,6 +85,21 @@ function buildCharts(marketData) {
   const ma10 = computeMovingAverage(prices, 10);
   const ma20 = computeMovingAverage(prices, 20);
   const avgVolumeSeries = prices.map(() => marketData.avgVolume);
+  const sourceBuckets = (marketData.news || []).reduce((accumulator, headline) => {
+    const source = String(headline?.source || 'Unknown').trim() || 'Unknown';
+    const sentiment = safeNumber(headline?.sentiment, 0);
+    if (!accumulator[source]) {
+      accumulator[source] = { sum: 0, count: 0 };
+    }
+    accumulator[source].sum += sentiment;
+    accumulator[source].count += 1;
+    return accumulator;
+  }, {});
+  const sentimentSources = Object.keys(sourceBuckets);
+  const sentimentBySource = sentimentSources.map((source) => {
+    const bucket = sourceBuckets[source];
+    return bucket.count > 0 ? parseFloat((bucket.sum / bucket.count).toFixed(2)) : 0;
+  });
 
   return {
     priceChart: {
@@ -131,13 +146,13 @@ function buildCharts(marketData) {
     },
     sentimentChart: {
       type: 'bar',
-      title: `${ticker} - News Sentiment`,
+      title: `${ticker} - News Sentiment by Source`,
       data: {
-        labels: marketData.news.map((headline) => headline.source),
+        labels: sentimentSources,
         datasets: [{
-          label: 'Sentiment Score',
-          data: marketData.news.map((headline) => headline.sentiment),
-          backgroundColor: marketData.news.map((headline) => (headline.sentiment > 0 ? 'rgba(16,185,129,0.7)' : 'rgba(239,68,68,0.7)')),
+          label: 'Avg Sentiment Score',
+          data: sentimentBySource,
+          backgroundColor: sentimentBySource.map((value) => (value > 0 ? 'rgba(16,185,129,0.7)' : 'rgba(239,68,68,0.7)')),
         }],
       },
     },

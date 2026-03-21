@@ -37,6 +37,60 @@ function hoursAgoFromDate(value) {
   return Math.max(0, Math.round((Date.now() - timestamp) / 3600000));
 }
 
+function normalizeHostname(hostname) {
+  return String(hostname || '').toLowerCase().replace(/^www\./, '').trim();
+}
+
+function hostnameToSourceLabel(hostname, fallbackSource = 'Unknown') {
+  const host = normalizeHostname(hostname);
+  if (!host) return fallbackSource;
+  if (host.includes('fool.com')) return 'The Motley Fool';
+  if (host.includes('reuters.com')) return 'Reuters';
+  if (host.includes('bloomberg.com')) return 'Bloomberg';
+  if (host.includes('wsj.com')) return 'WSJ';
+  if (host.includes('cnbc.com')) return 'CNBC';
+  if (host.includes('finance.yahoo.com') || host === 'yahoo.com' || host.endsWith('.yahoo.com')) return 'Yahoo Finance';
+  if (host.includes('marketwatch.com')) return 'MarketWatch';
+  return host;
+}
+
+async function resolveArticleSourceLabel(articleUrl, fallbackSource = 'Unknown') {
+  const rawUrl = String(articleUrl || '').trim();
+  if (!rawUrl) return fallbackSource;
+
+  try {
+    const initial = new URL(rawUrl);
+    const initialHost = normalizeHostname(initial.hostname);
+    if (initialHost && initialHost !== 'finnhub.io') {
+      return hostnameToSourceLabel(initialHost, fallbackSource);
+    }
+  } catch {
+    return fallbackSource;
+  }
+
+  try {
+    const response = await withTimeout(
+      fetch(rawUrl, { method: 'HEAD', redirect: 'follow' }),
+      ENRICHMENT_TIMEOUT_MS,
+      `Resolve article source for ${rawUrl}`
+    );
+    const finalHost = normalizeHostname(new URL(response.url).hostname);
+    return hostnameToSourceLabel(finalHost, fallbackSource);
+  } catch {
+    try {
+      const response = await withTimeout(
+        fetch(rawUrl, { method: 'GET', redirect: 'follow' }),
+        ENRICHMENT_TIMEOUT_MS,
+        `Resolve article source (GET fallback) for ${rawUrl}`
+      );
+      const finalHost = normalizeHostname(new URL(response.url).hostname);
+      return hostnameToSourceLabel(finalHost, fallbackSource);
+    } catch {
+      return fallbackSource;
+    }
+  }
+}
+
 const MACRO_THEME_RULES = [
   {
     theme: 'GEOPOLITICS',
@@ -376,12 +430,15 @@ async function fetchFinnhubNews(ticker, context = {}, dependencies = {}) {
     const articles = data.slice(0, 5);
     const headlines = articles.map(a => a.headline || '');
     const scores = scoreSentimentsWithRules(headlines);
+    const resolvedSources = await Promise.all(
+      articles.map((article) => resolveArticleSourceLabel(article.url || '', article.source || 'Finnhub'))
+    );
 
     const ruleScoredNews = articles.map((article, i) => ({
       title: article.headline || '',
       summary: (article.summary || article.description || article.lead_image || article.text || '').substring(0, 200), // Try multiple fields, cap at 200 chars
       url: article.url || '',
-      source: article.source || 'Finnhub',
+      source: resolvedSources[i] || article.source || 'Finnhub',
       sentiment: scores[i] ?? 0,
       hoursAgo: Math.round((Date.now() - (article.datetime * 1000)) / 3600000),
     }));
@@ -892,14 +949,26 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
   const priceTarget = priceTargetResult.status === 'fulfilled' ? priceTargetResult.value : null;
   let priceHistorySource = 'finnhub';
 
-  if (!Array.isArray(priceHistory) || priceHistory.length < 50) {
-    const alphaHistory = await fetchAlphaVantagePriceHistory(ticker);
-    if (!Array.isArray(alphaHistory?.priceHistory) || alphaHistory.priceHistory.length < 50) {
-      throw new Error('Finnhub returned insufficient price history');
+  if (!Array.isArray(priceHistory) || priceHistory.length < 252) {
+    let yahooHistory = null;
+    try {
+      yahooHistory = await fetchYahooFinancePriceHistory(ticker, 730);
+    } catch {
+      yahooHistory = null;
     }
 
-    priceHistory = alphaHistory.priceHistory;
-    priceHistorySource = 'alpha-vantage-history';
+    if (Array.isArray(yahooHistory) && yahooHistory.length >= 252) {
+      priceHistory = yahooHistory;
+      priceHistorySource = 'yahoo-finance-history';
+    } else {
+      const alphaHistory = await fetchAlphaVantagePriceHistory(ticker);
+      if (!Array.isArray(alphaHistory?.priceHistory) || alphaHistory.priceHistory.length < 252) {
+        throw new Error('Finnhub returned insufficient price history');
+      }
+
+      priceHistory = alphaHistory.priceHistory;
+      priceHistorySource = 'alpha-vantage-history';
+    }
   }
 
   const closes = priceHistory.map((day) => day.close).filter((value) => value > 0);
@@ -1027,8 +1096,26 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
     dataSource: 'finnhub',
-    fallbackReason: priceHistorySource === 'finnhub' ? null : 'Finnhub candle history unavailable; Alpha Vantage used for price history.',
+    fallbackReason: priceHistorySource === 'finnhub'
+      ? null
+      : priceHistorySource === 'yahoo-finance-history'
+        ? 'Finnhub candle history unavailable; Yahoo Finance used for price history.'
+        : 'Finnhub candle history unavailable; Alpha Vantage used for price history.',
     priceHistorySource,
+    dataSourceBreakdown: {
+      price: priceHistorySource === 'finnhub'
+        ? 'Finnhub (Real)'
+        : priceHistorySource === 'yahoo-finance-history'
+          ? 'Yahoo Finance (Real fallback)'
+          : 'Alpha Vantage (Real fallback)',
+      technicals: priceHistorySource === 'finnhub'
+        ? 'Finnhub (Real)'
+        : priceHistorySource === 'yahoo-finance-history'
+          ? 'Yahoo Finance (Real fallback)'
+          : 'Alpha Vantage (Real fallback)',
+      news: Array.isArray(companyNews) && companyNews.length > 0 ? 'Finnhub (Real)' : 'No news found',
+      macro: macroNews.length > 0 ? 'Finnhub + NewsAPI (Real)' : 'No macro news',
+    },
     finnhubData: {
       profile: !!profile,
       metrics: !!metrics,
@@ -1053,6 +1140,33 @@ function getYahooFinance() {
     _yf = new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
   }
   return _yf;
+}
+
+async function fetchYahooFinancePriceHistory(ticker, lookbackDays = 730) {
+  const yf = getYahooFinance();
+  const to = new Date();
+  const from = new Date(Date.now() - lookbackDays * 24 * 3600 * 1000);
+
+  const chart = await withTimeout(yf.chart(ticker, {
+    period1: from.toISOString().split('T')[0],
+    period2: to.toISOString().split('T')[0],
+    interval: '1d',
+    events: '',
+  }, {
+    validateResult: false,
+  }), REAL_DATA_TIMEOUT_MS, `Yahoo chart history fetch for ${ticker}`);
+
+  const validHistory = (chart?.quotes || []).filter((bar) => bar && bar.date && safeNumber(bar.close) > 0);
+  if (!validHistory || validHistory.length < 5) return null;
+
+  return validHistory.map((bar) => ({
+    date: new Date(bar.date).toISOString().split('T')[0],
+    open: parseFloat(safeNumber(bar.open).toFixed(4)),
+    high: parseFloat(safeNumber(bar.high).toFixed(4)),
+    low: parseFloat(safeNumber(bar.low).toFixed(4)),
+    close: parseFloat(safeNumber(bar.close).toFixed(4)),
+    volume: Math.floor(safeNumber(bar.volume)),
+  }));
 }
 
 async function fetchYahooFinanceData(ticker, dependencies = {}) {
@@ -1324,6 +1438,7 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
       macroNews,
     }),
     priceHistory,
+    priceHistorySource: 'yahoo-finance-history',
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
     dataSource: 'yahoo-finance',
@@ -1671,9 +1786,16 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       macroNews,
     }),
     priceHistory,
+    priceHistorySource: 'alpha-vantage-history',
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
     dataSource: 'alpha-vantage',
+    dataSourceBreakdown: {
+      price: 'Alpha Vantage (Real)',
+      technicals: 'Alpha Vantage (Real)',
+      news: news.length > 0 ? 'Finnhub (Real)' : 'No news found',
+      macro: macroNews.length > 0 ? 'Finnhub + NewsAPI (Real)' : 'No macro news',
+    },
     finnhubData: {
       profile: !!finnhubProfile,
       metrics: !!finnhubMetrics,
@@ -1690,7 +1812,7 @@ async function fetchAlphaVantagePriceHistory(ticker) {
     throw new Error('ALPHA_VANTAGE_API_KEY is missing or set to demo');
   }
 
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=compact&apikey=${apiKey}`;
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=full&apikey=${apiKey}`;
   const response = await withTimeout(fetch(url), REAL_DATA_TIMEOUT_MS, `Alpha Vantage core price fetch for ${ticker}`);
 
   if (!response.ok) {
