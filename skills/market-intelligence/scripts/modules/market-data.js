@@ -39,11 +39,387 @@ const { fetchAlphaVantagePriceHistory } = require('./api-alpha');
 
 const { 
   fetchNewsApiMacroNews, 
+  fetchGoogleNewsRssQuery,
   fetchLatestCentralBankDecision, 
   fetchAsicShortSellingData, 
   fetchAsxAnnouncements, 
   fetchGoogleNewsRss 
 } = require('./api-news');
+
+const MACRO_RECENT_HOURS = 48;
+const MACRO_RECENT_MIN_ITEMS = 4;
+const MACRO_GOOGLE_QUERY = 'fed OR rba OR rate decision OR geopolitics OR war OR sanctions OR oil markets';
+
+const SECTOR_PROXY_UNIVERSE = [
+  { name: 'Technology', etf: 'XLK', aliases: ['technology', 'software', 'internet'] },
+  { name: 'Semiconductors', etf: 'SOXX', aliases: ['semiconductor', 'chip'] },
+  { name: 'Financials', etf: 'XLF', aliases: ['financial', 'bank', 'insurance'] },
+  { name: 'Healthcare', etf: 'XLV', aliases: ['healthcare', 'health care', 'biotech', 'pharma'] },
+  { name: 'Energy', etf: 'XLE', aliases: ['energy', 'oil', 'gas'] },
+  { name: 'Materials', etf: 'XLB', aliases: ['materials', 'material', 'chemicals', 'metals'] },
+  { name: 'Mining', etf: 'XME', aliases: ['mining', 'miner', 'metal mining'] },
+  { name: 'Industrials', etf: 'XLI', aliases: ['industrial', 'manufacturing'] },
+  { name: 'Consumer Discretionary', etf: 'XLY', aliases: ['consumer discretionary', 'retail', 'automotive', 'e-commerce'] },
+  { name: 'Communication Services', etf: 'XLC', aliases: ['communication', 'media', 'telecom', 'social media'] },
+];
+
+const DEFAULT_SECTOR_NAMES = [
+  'Technology',
+  'Financials',
+  'Healthcare',
+  'Energy',
+  'Materials',
+  'Mining',
+  'Industrials',
+  'Consumer Discretionary',
+];
+
+const ASX_PEER_FALLBACK_BY_SECTOR = {
+  technology: ['XRO.AX', 'WTC.AX', 'TNE.AX', 'NXT.AX', 'ALU.AX', 'CPU.AX'],
+  financials: ['CBA.AX', 'WBC.AX', 'ANZ.AX', 'NAB.AX', 'MQG.AX', 'QBE.AX'],
+  healthcare: ['CSL.AX', 'COH.AX', 'RMD.AX', 'SHL.AX', 'PME.AX', 'RHC.AX'],
+  energy: ['WDS.AX', 'STO.AX', 'ORG.AX', 'KAR.AX', 'BPT.AX', 'WHC.AX'],
+  materials: ['BHP.AX', 'RIO.AX', 'FMG.AX', 'S32.AX', 'MIN.AX', 'NST.AX'],
+  mining: ['BHP.AX', 'RIO.AX', 'FMG.AX', 'MIN.AX', 'S32.AX', 'LYC.AX'],
+  industrials: ['TCL.AX', 'SGP.AX', 'REH.AX', 'ALQ.AX', 'QAN.AX', 'AIA.AX'],
+  'consumer discretionary': ['JBH.AX', 'HVN.AX', 'ALL.AX', 'WES.AX', 'DMP.AX', 'APE.AX'],
+  'communication services': ['TLS.AX', 'REA.AX', 'CAR.AX', 'SEK.AX', 'NWS.AX', 'APE.AX'],
+  utilities: ['AST.AX', 'APA.AX', 'MEZ.AX', 'IFL.AX', 'MCY.AX', 'SKI.AX'],
+  'real estate': ['GMG.AX', 'SCG.AX', 'CHC.AX', 'VCX.AX', 'GPT.AX', 'MGR.AX'],
+};
+
+const ASX_PEER_FALLBACK_DEFAULT = ['BHP.AX', 'CBA.AX', 'CSL.AX', 'WBC.AX', 'WDS.AX', 'RIO.AX'];
+
+function isAsxMarket({ ticker = '', exchange = '', country = '' } = {}) {
+  const upperTicker = String(ticker || '').toUpperCase();
+  const upperExchange = String(exchange || '').toUpperCase();
+  const upperCountry = String(country || '').toUpperCase();
+  return upperTicker.endsWith('.AX') || upperExchange.includes('ASX') || upperCountry === 'AU' || upperCountry === 'AUS';
+}
+
+function resolvePeerUniverse({ ticker, sector, exchange, country, peers = [] } = {}) {
+  const baseTicker = String(ticker || '').toUpperCase();
+  const normalizedPeers = Array.from(new Set((peers || []).filter(Boolean).map((item) => String(item).toUpperCase())))
+    .filter((symbol) => symbol !== baseTicker)
+    .slice(0, 6);
+
+  if (normalizedPeers.length > 0) {
+    return normalizedPeers;
+  }
+
+  if (!isAsxMarket({ ticker, exchange, country })) {
+    return [];
+  }
+
+  const lowerSector = String(sector || '').toLowerCase();
+  const sectorKey = Object.keys(ASX_PEER_FALLBACK_BY_SECTOR).find((key) => lowerSector.includes(key));
+  const fallbackUniverse = sectorKey
+    ? ASX_PEER_FALLBACK_BY_SECTOR[sectorKey]
+    : ASX_PEER_FALLBACK_DEFAULT;
+
+  return Array.from(new Set((fallbackUniverse || []).map((item) => String(item).toUpperCase())))
+    .filter((symbol) => symbol !== baseTicker)
+    .slice(0, 6);
+}
+
+function resolveSectorProxy(sector) {
+  const lowerSector = String(sector || '').toLowerCase().trim();
+  if (!lowerSector) return null;
+  return SECTOR_PROXY_UNIVERSE.find((item) =>
+    item.name.toLowerCase() === lowerSector
+    || item.aliases.some((alias) => lowerSector.includes(alias))
+  ) || null;
+}
+
+function resolveSectorTargets(primarySector) {
+  const targetOrder = [];
+  const selected = new Set();
+
+  const addByName = (name) => {
+    const entry = SECTOR_PROXY_UNIVERSE.find((item) => item.name === name);
+    if (!entry || selected.has(entry.etf)) return;
+    selected.add(entry.etf);
+    targetOrder.push(entry);
+  };
+
+  const primaryEntry = resolveSectorProxy(primarySector);
+  if (primaryEntry) {
+    addByName(primaryEntry.name);
+  }
+
+  DEFAULT_SECTOR_NAMES.forEach(addByName);
+  return targetOrder.slice(0, 8);
+}
+
+function resolveBenchmarkTarget({ ticker = '', exchange = '', country = '' } = {}) {
+  const upperTicker = String(ticker || '').toUpperCase();
+  const upperExchange = String(exchange || '').toUpperCase();
+  const upperCountry = String(country || '').toUpperCase();
+
+  if (upperTicker.endsWith('.AX') || upperExchange.includes('ASX') || upperCountry === 'AU' || upperCountry === 'AUS') {
+    return {
+      name: 'ASX 200',
+      benchmarkTicker: '^AXJO',
+      market: 'ASX',
+    };
+  }
+
+  return {
+    name: 'S&P 500',
+    benchmarkTicker: '^GSPC',
+    market: 'US',
+  };
+}
+
+async function fetchBenchmarkTrend({ ticker, exchange, country } = {}) {
+  const target = resolveBenchmarkTarget({ ticker, exchange, country });
+  if (!target?.benchmarkTicker) return null;
+
+  try {
+    const yf = getYahooFinance();
+    const to = new Date();
+    const from = new Date(Date.now() - 100 * 24 * 3600 * 1000);
+
+    const chart = await withTimeout(yf.chart(target.benchmarkTicker, {
+      period1: from.toISOString().split('T')[0],
+      period2: to.toISOString().split('T')[0],
+      interval: '1d',
+      events: '',
+    }, {
+      validateResult: false,
+    }), ENRICHMENT_TIMEOUT_MS, `Benchmark trend fetch for ${target.benchmarkTicker}`);
+
+    const quotes = (chart?.quotes || []).filter((bar) => bar && bar.date && safeNumber(bar.close) > 0);
+    if (!Array.isArray(quotes) || quotes.length < 20) return null;
+
+    const history = quotes.slice(-65).map((bar) => ({
+      date: new Date(bar.date).toISOString().split('T')[0],
+      close: parseFloat(safeNumber(bar.close).toFixed(4)),
+    }));
+
+    const firstClose = safeNumber(history[0]?.close);
+    const lastClose = safeNumber(history[history.length - 1]?.close, firstClose);
+    const changePercent = firstClose > 0
+      ? ((lastClose - firstClose) / firstClose) * 100
+      : 0;
+
+    return {
+      name: target.name,
+      benchmarkTicker: target.benchmarkTicker,
+      market: target.market,
+      trend: changePercent > 1 ? 'BULLISH' : changePercent < -1 ? 'BEARISH' : 'NEUTRAL',
+      changePercent: parseFloat(changePercent.toFixed(2)),
+      history,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchSectorTrends(primarySector = 'Unknown') {
+  const targets = resolveSectorTargets(primarySector);
+  if (targets.length === 0) return [];
+
+  const yf = getYahooFinance();
+  const to = new Date();
+  const from = new Date(Date.now() - 100 * 24 * 3600 * 1000);
+
+  const results = await Promise.allSettled(
+    targets.map(async (target) => {
+      const chart = await withTimeout(yf.chart(target.etf, {
+        period1: from.toISOString().split('T')[0],
+        period2: to.toISOString().split('T')[0],
+        interval: '1d',
+        events: '',
+      }, {
+        validateResult: false,
+      }), ENRICHMENT_TIMEOUT_MS, `Sector trend fetch for ${target.etf}`);
+
+      const quotes = (chart?.quotes || []).filter((bar) => bar && bar.date && safeNumber(bar.close) > 0);
+      if (!Array.isArray(quotes) || quotes.length < 20) {
+        throw new Error(`Insufficient sector trend history for ${target.etf}`);
+      }
+
+      const history = quotes.slice(-65).map((bar) => ({
+        date: new Date(bar.date).toISOString().split('T')[0],
+        close: parseFloat(safeNumber(bar.close).toFixed(4)),
+      }));
+
+      const firstClose = safeNumber(history[0]?.close);
+      const lastClose = safeNumber(history[history.length - 1]?.close, firstClose);
+      const changePercent = firstClose > 0
+        ? ((lastClose - firstClose) / firstClose) * 100
+        : 0;
+
+      return {
+        sector: target.name,
+        proxyTicker: target.etf,
+        trend: changePercent > 1 ? 'BULLISH' : changePercent < -1 ? 'BEARISH' : 'NEUTRAL',
+        changePercent: parseFloat(changePercent.toFixed(2)),
+        history,
+      };
+    })
+  );
+
+  const byTicker = new Map(
+    results
+      .filter((result) => result.status === 'fulfilled' && result.value)
+      .map((result) => [result.value.proxyTicker, result.value])
+  );
+
+  return targets
+    .map((target) => byTicker.get(target.etf))
+    .filter(Boolean);
+}
+
+function hasFreshMacroCoverage(articles = []) {
+  if (!Array.isArray(articles) || articles.length === 0) return false;
+  const freshCount = articles.filter((article) => safeNumber(article?.hoursAgo, 9999) <= MACRO_RECENT_HOURS).length;
+  return freshCount >= MACRO_RECENT_MIN_ITEMS;
+}
+
+function computeRsi(values = []) {
+  if (!Array.isArray(values) || values.length < 15) return null;
+  const gains = [];
+  const losses = [];
+  for (let index = 1; index < values.length; index += 1) {
+    const diff = safeNumber(values[index]) - safeNumber(values[index - 1]);
+    gains.push(diff > 0 ? diff : 0);
+    losses.push(diff < 0 ? Math.abs(diff) : 0);
+  }
+
+  const recentGains = gains.slice(-14);
+  const recentLosses = losses.slice(-14);
+  const avgGain = average(recentGains);
+  const avgLoss = average(recentLosses);
+  const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+  return parseFloat((100 - 100 / (1 + rs)).toFixed(1));
+}
+
+function clampScore(value, min = -1, max = 1) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function buildFundamentalScore({ pe, eps, roe, marketCap }) {
+  const peScore = pe > 0 ? clampScore((28 - pe) / 28) : 0;
+  const epsScore = clampScore((eps || 0) / 8);
+  const roePercent = safeNumber(roe) * 100;
+  const roeScore = clampScore(roePercent / 20);
+  const sizeScore = marketCap > 0 ? clampScore((Math.log10(marketCap) - 10) / 3) : 0;
+  return parseFloat(average([peScore, epsScore, roeScore, sizeScore]).toFixed(2));
+}
+
+function buildTradingScore({ return3m, rsi, volumeRatio }) {
+  const momentumScore = clampScore((return3m || 0) / 20);
+  const rsiScore = Number.isFinite(rsi) ? clampScore((rsi - 50) / 25) : 0;
+  const volumeScore = Number.isFinite(volumeRatio) ? clampScore((volumeRatio - 1) / 1.2) : 0;
+  return parseFloat(average([momentumScore, rsiScore, volumeScore]).toFixed(2));
+}
+
+async function fetchPeerComparisons(baseTicker, peersInput = []) {
+  const peers = Array.from(new Set((peersInput || []).filter(Boolean)))
+    .filter((symbol) => String(symbol).toUpperCase() !== String(baseTicker).toUpperCase())
+    .slice(0, 6);
+  if (peers.length === 0) return [];
+
+  const yf = getYahooFinance();
+  const to = new Date();
+  const from = new Date(Date.now() - 100 * 24 * 3600 * 1000);
+
+  const results = await Promise.allSettled(peers.map(async (symbol) => {
+    const [summaryResult, chartResult] = await Promise.allSettled([
+      withTimeout(yf.quoteSummary(symbol, {
+        modules: ['price', 'financialData', 'defaultKeyStatistics'],
+      }), ENRICHMENT_TIMEOUT_MS, `Peer summary fetch for ${symbol}`),
+      withTimeout(yf.chart(symbol, {
+        period1: from.toISOString().split('T')[0],
+        period2: to.toISOString().split('T')[0],
+        interval: '1d',
+        events: '',
+      }, {
+        validateResult: false,
+      }), ENRICHMENT_TIMEOUT_MS, `Peer chart fetch for ${symbol}`),
+    ]);
+
+    if (summaryResult.status !== 'fulfilled' || chartResult.status !== 'fulfilled') {
+      return null;
+    }
+
+    const summary = summaryResult.value || {};
+    const price = summary.price || {};
+    const financialData = summary.financialData || {};
+    const keyStats = summary.defaultKeyStatistics || {};
+
+    const quotes = (chartResult.value?.quotes || []).filter((bar) => bar && bar.date && safeNumber(bar.close) > 0);
+    if (quotes.length < 20) return null;
+
+    const history = quotes.slice(-65).map((bar) => ({
+      date: new Date(bar.date).toISOString().split('T')[0],
+      close: parseFloat(safeNumber(bar.close).toFixed(4)),
+      volume: Math.floor(safeNumber(bar.volume)),
+    }));
+
+    const firstClose = safeNumber(history[0]?.close);
+    const lastClose = safeNumber(history[history.length - 1]?.close, firstClose);
+    const return3m = firstClose > 0 ? ((lastClose - firstClose) / firstClose) * 100 : 0;
+    const closeSeries = history.map((point) => safeNumber(point.close));
+    const rsi = computeRsi(closeSeries);
+    const latestVolume = safeNumber(history[history.length - 1]?.volume);
+    const avgVolume20 = average(history.slice(-20).map((point) => safeNumber(point.volume)));
+    const volumeRatio = avgVolume20 > 0 ? latestVolume / avgVolume20 : 0;
+
+    const marketCap = safeNumber(price.marketCap);
+    const pe = safeNumber(keyStats.forwardPE || keyStats.trailingPE);
+    const eps = safeNumber(keyStats.trailingEps);
+    const roe = safeNumber(financialData.returnOnEquity);
+
+    const fundamentalScore = buildFundamentalScore({ pe, eps, roe, marketCap });
+    const tradingScore = buildTradingScore({ return3m, rsi, volumeRatio });
+
+    return {
+      symbol,
+      name: price.longName || price.shortName || symbol,
+      marketCap,
+      pe,
+      eps,
+      roe,
+      return3m: parseFloat(return3m.toFixed(2)),
+      rsi: Number.isFinite(rsi) ? rsi : null,
+      latestVolume,
+      avgVolume20: Math.round(avgVolume20 || 0),
+      volumeRatio: parseFloat((volumeRatio || 0).toFixed(2)),
+      sentiment: 0,
+      fundamentalScore,
+      tradingScore,
+    };
+  }));
+
+  return results
+    .filter((result) => result.status === 'fulfilled' && result.value)
+    .map((result) => result.value);
+}
+
+async function buildMacroNewsWithFallback({ ticker, sector, finnhubMacroNews, newsApiMacroNews, dependencies = {} }) {
+  let merged = [...(finnhubMacroNews || []), ...(newsApiMacroNews || [])];
+
+  if (!hasFreshMacroCoverage(merged)) {
+    try {
+      const googleSupplement = await withTimeout(
+        fetchGoogleNewsRssQuery(MACRO_GOOGLE_QUERY),
+        ENRICHMENT_TIMEOUT_MS,
+        `Google macro RSS fallback for ${ticker}`
+      );
+      merged = dedupeArticlesByTitle([...(googleSupplement || []), ...merged]);
+    } catch {
+    }
+  }
+
+  return scoreMacroNewsWithLlm(
+    merged,
+    { ticker, sector },
+    dependencies
+  );
+}
 
 
 async function fetchFinnhubMarketData(ticker, dependencies = {}) {
@@ -137,6 +513,20 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
 
   const companyName = profile?.name || `${ticker} Corp.`;
   const sector = profile?.sector || 'Unknown';
+  const sectorTrends = await fetchSectorTrends(sector);
+  const benchmarkTrend = await fetchBenchmarkTrend({
+    ticker,
+    exchange: profile?.exchange,
+    country: yahooProfile?.country || profile?.country,
+  });
+  const peerSymbols = resolvePeerUniverse({
+    ticker,
+    sector,
+    exchange: profile?.exchange,
+    country: yahooProfile?.country || profile?.country,
+    peers,
+  });
+  const peerComparisons = await fetchPeerComparisons(ticker, peerSymbols);
 
   const [companyNewsResult, finnhubMacroNewsResult, newsApiMacroNewsResult, fedDecisionResult, rbaDecisionResult] = await Promise.allSettled([
     withTimeout(fetchFinnhubNews(ticker, {
@@ -173,11 +563,13 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
     fed: fedDecisionResult.status === 'fulfilled' ? fedDecisionResult.value : null,
     rba: rbaDecisionResult.status === 'fulfilled' ? rbaDecisionResult.value : null,
   };
-  const macroNews = await scoreMacroNewsWithLlm(
-    [...finnhubMacroNews, ...newsApiMacroNews],
-    { ticker, sector },
-    dependencies
-  );
+  const macroNews = await buildMacroNewsWithFallback({
+    ticker,
+    sector,
+    finnhubMacroNews,
+    newsApiMacroNews,
+    dependencies,
+  });
 
   const sentimentScore = Array.isArray(companyNews) && companyNews.length > 0
     ? parseFloat((companyNews.reduce((sum, article) => sum + safeNumber(article.sentiment), 0) / companyNews.length).toFixed(2))
@@ -240,7 +632,8 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
       upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
     },
     earningsSurprise,
-    peers,
+    peers: peerSymbols,
+    peerComparisons,
     news: Array.isArray(companyNews) ? companyNews : [],
     macroContext: buildMacroContext({
       ticker,
@@ -248,6 +641,8 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
       macroNews,
       policyDecisions,
     }),
+    sectorTrends,
+    benchmarkTrend,
     priceHistory,
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),
@@ -275,6 +670,9 @@ async function fetchFinnhubMarketData(ticker, dependencies = {}) {
           ? 'Yahoo Finance (Real fallback)'
           : 'No news found',
       macro: macroNews.length > 0 ? 'Finnhub + NewsAPI (Real)' : 'No macro news',
+      sectorTrends: sectorTrends.length > 0 ? 'Yahoo Finance Sector ETFs (Real)' : 'Unavailable',
+      benchmark: benchmarkTrend ? 'Yahoo Finance Benchmark Index (Real)' : 'Unavailable',
+      peerComparisons: peerComparisons.length > 0 ? 'Yahoo Finance Peer Metrics (Real)' : 'Unavailable',
     },
     finnhubData: {
       profile: !!profile,
@@ -490,11 +888,13 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
         const newsApiMacroNews = newsApiMacroNewsResult.status === 'fulfilled' ? newsApiMacroNewsResult.value : [];
         
         const startMacroLlm = Date.now();
-        const result = await scoreMacroNewsWithLlm(
-          [...finnhubMacroNews, ...newsApiMacroNews],
-          { ticker, sector: sp.sector || sp.industry || 'Unknown' },
-          dependencies
-        );
+        const result = await buildMacroNewsWithFallback({
+          ticker,
+          sector: sp.sector || sp.industry || 'Unknown',
+          finnhubMacroNews,
+          newsApiMacroNews,
+          dependencies,
+        });
         perfMs.macroNewsLlm = Date.now() - startMacroLlm;
         return result;
       } catch {
@@ -545,6 +945,29 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
   const targetHigh = safeNumber(fd.targetHighPrice) || (price * 1.12);
   const targetLow = safeNumber(fd.targetLowPrice) || (price * 0.9);
   const effectiveTargetMean = targetMean || (targetHigh + targetLow) / 2;
+  const sectorLabel = sp.sector || sp.industry || 'Unknown';
+  let peerSymbols = [];
+  if (config.finnhubApiKey) {
+    try {
+      peerSymbols = await withTimeout(fetchFinnhubPeers(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub peers fetch for ${ticker}`);
+    } catch {
+      peerSymbols = [];
+    }
+  }
+  const resolvedYahooPeers = resolvePeerUniverse({
+    ticker,
+    sector: sectorLabel,
+    exchange: priceMod.exchangeName,
+    country: sp.country,
+    peers: peerSymbols,
+  });
+  const peerComparisons = await fetchPeerComparisons(ticker, resolvedYahooPeers);
+  const sectorTrends = await fetchSectorTrends(sectorLabel);
+  const benchmarkTrend = await fetchBenchmarkTrend({
+    ticker,
+    exchange: priceMod.exchangeName,
+    country: sp.country,
+  });
 
   return {
     ticker,
@@ -590,14 +1013,18 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
     insiderTransactions,
     institutionOwnership,
     earningsSurprise,
+    peers: resolvedYahooPeers,
+    peerComparisons,
     news: yahooNews,
     shortMetrics,
     macroContext: buildMacroContext({
       ticker,
-      sector: sp.sector || sp.industry || 'Unknown',
+      sector: sectorLabel,
       macroNews,
       policyDecisions: { fed: fedDecision, rba: rbaDecision },
     }),
+    sectorTrends,
+    benchmarkTrend,
     priceHistory,
     priceHistorySource: 'yahoo-finance-history',
     technicalIndicators: calculateAllIndicators(priceHistory),
@@ -612,6 +1039,9 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
         ? (shortMetrics.dataSource || 'ASIC (Real)')
         : (shortMetrics?.dataSource || 'Mock'),
       macro: macroNews.length > 0 ? 'Finnhub + NewsAPI (Real)' : 'No macro news',
+      sectorTrends: sectorTrends.length > 0 ? 'Yahoo Finance Sector ETFs (Real)' : 'Unavailable',
+      benchmark: benchmarkTrend ? 'Yahoo Finance Benchmark Index (Real)' : 'Unavailable',
+      peerComparisons: peerComparisons.length > 0 ? 'Yahoo Finance Peer Metrics (Real)' : 'Unavailable',
     },
     perfMs: {
       total: Date.now() - startTotal,
@@ -676,6 +1106,7 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
   let finnhubNews = [];
   let finnhubRecommendations = null;
   let finnhubPriceTarget = null;
+  let finnhubPeers = [];
 
   let finnhubMacroNews = [];
   let newsApiMacroNews = [];
@@ -696,6 +1127,7 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       withTimeout(fetchNewsApiMacroNews(), ENRICHMENT_TIMEOUT_MS, `NewsAPI macro news for ${ticker}`),
       withTimeout(fetchLatestCentralBankDecision('FED'), ENRICHMENT_TIMEOUT_MS, `FED rate decision fetch for ${ticker}`),
       withTimeout(fetchLatestCentralBankDecision('RBA'), ENRICHMENT_TIMEOUT_MS, `RBA rate decision fetch for ${ticker}`),
+      withTimeout(fetchFinnhubPeers(ticker), ENRICHMENT_TIMEOUT_MS, `Finnhub peers fetch for ${ticker}`),
     ]);
 
     finnhubProfile = enrichmentResults[0].status === 'fulfilled' ? enrichmentResults[0].value : null;
@@ -707,6 +1139,7 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
     newsApiMacroNews = enrichmentResults[6].status === 'fulfilled' ? enrichmentResults[6].value : [];
     fedDecision = enrichmentResults[7].status === 'fulfilled' ? enrichmentResults[7].value : null;
     rbaDecision = enrichmentResults[8].status === 'fulfilled' ? enrichmentResults[8].value : null;
+    finnhubPeers = enrichmentResults[9].status === 'fulfilled' ? enrichmentResults[9].value : [];
   } else {
     const [finnhubMacroNewsResult, newsApiMacroNewsResult, fedDecisionResult, rbaDecisionResult] = await Promise.allSettled([
       withTimeout(fetchFinnhubMacroNews(), ENRICHMENT_TIMEOUT_MS, `Finnhub macro news for ${ticker}`),
@@ -722,6 +1155,20 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
 
   const name = finnhubProfile?.name || `${ticker} Corp.`;
   const sector = finnhubProfile?.sector || 'Unknown';
+  const sectorTrends = await fetchSectorTrends(sector);
+  const benchmarkTrend = await fetchBenchmarkTrend({
+    ticker,
+    exchange: finnhubProfile?.exchange,
+    country: finnhubProfile?.country,
+  });
+  const resolvedAlphaPeers = resolvePeerUniverse({
+    ticker,
+    sector,
+    exchange: finnhubProfile?.exchange,
+    country: finnhubProfile?.country,
+    peers: finnhubPeers,
+  });
+  const peerComparisons = await fetchPeerComparisons(ticker, resolvedAlphaPeers);
   const pe = finnhubMetrics?.pe || 0;
   const eps = finnhubMetrics?.eps || 0;
   const marketCap = finnhubProfile?.marketCap || 0;
@@ -785,6 +1232,8 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       targetMean: parseFloat(targetMean.toFixed(2)),
       upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
     },
+    peers: resolvedAlphaPeers,
+    peerComparisons,
     news,
     macroContext: buildMacroContext({
       ticker,
@@ -792,6 +1241,8 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       macroNews,
       policyDecisions: { fed: fedDecision, rba: rbaDecision },
     }),
+    sectorTrends,
+    benchmarkTrend,
     priceHistory,
     priceHistorySource: 'alpha-vantage-history',
     technicalIndicators: calculateAllIndicators(priceHistory),
@@ -802,6 +1253,9 @@ async function fetchAlphaVantageMarketData(ticker, dependencies = {}) {
       technicals: 'Alpha Vantage (Real)',
       news: news.length > 0 ? 'Finnhub (Real)' : 'No news found',
       macro: macroNews.length > 0 ? 'Finnhub + NewsAPI (Real)' : 'No macro news',
+      sectorTrends: sectorTrends.length > 0 ? 'Yahoo Finance Sector ETFs (Real)' : 'Unavailable',
+      benchmark: benchmarkTrend ? 'Yahoo Finance Benchmark Index (Real)' : 'Unavailable',
+      peerComparisons: peerComparisons.length > 0 ? 'Yahoo Finance Peer Metrics (Real)' : 'Unavailable',
     },
     finnhubData: {
       profile: !!finnhubProfile,

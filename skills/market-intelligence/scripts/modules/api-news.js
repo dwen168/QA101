@@ -90,6 +90,9 @@ async function fetchNewsApiMacroNews() {
   if (!apiKey) return [];
 
   try {
+    const RECENT_WINDOW_HOURS = 48;
+    const FRESH_NEWS_MIN_HOURS = 24;
+    const GEO_KEYWORDS = ['war', 'conflict', 'missile', 'sanction', 'geopolitic', 'iran', 'israel', 'ukraine', 'russia', 'taiwan', 'china'];
     const from = new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString();
     const query = encodeURIComponent('((fed OR "federal reserve" OR fomc OR powell OR rba OR "reserve bank of australia" OR "cash rate" OR "rate decision" OR "policy meeting" OR war OR sanctions OR geopolitics OR oil) AND (market OR markets OR equities OR asx OR stocks OR investors))');
     const url = `https://newsapi.org/v2/everything?q=${query}&language=en&sortBy=publishedAt&pageSize=20&from=${encodeURIComponent(from)}&apiKey=${apiKey}`;
@@ -99,25 +102,65 @@ async function fetchNewsApiMacroNews() {
     const payload = await response.json();
     if (!Array.isArray(payload.articles)) return [];
 
-    const policyFirst = payload.articles.filter((article) =>
-      detectFedRbaPolicyMention(`${article?.title || ''} ${article?.description || ''}`)
+    const ranked = dedupeArticlesByTitle(
+      payload.articles
+        .map((article) => {
+          const text = `${article?.title || ''} ${article?.description || ''}`;
+          const hoursAgo = hoursAgoFromDate(article?.publishedAt);
+          const theme = detectMacroTheme(text);
+          const isPolicy = detectFedRbaPolicyMention(text);
+          const lowerText = text.toLowerCase();
+          const geoHits = GEO_KEYWORDS.reduce((count, keyword) => (lowerText.includes(keyword) ? count + 1 : count), 0);
+          const freshnessScore = Number.isFinite(hoursAgo)
+            ? Math.max(0, (RECENT_WINDOW_HOURS - Math.min(hoursAgo, RECENT_WINDOW_HOURS)) / RECENT_WINDOW_HOURS)
+            : 0;
+          const rankScore =
+            freshnessScore +
+            (isPolicy ? 0.35 : 0) +
+            (theme === 'GEOPOLITICS' ? 0.35 : 0) +
+            Math.min(0.4, geoHits * 0.08);
+
+          return {
+            ...article,
+            __hoursAgo: hoursAgo,
+            __theme: theme,
+            __rankScore: rankScore,
+          };
+        })
+        .sort((left, right) => {
+          const rankDiff = safeNumber(right.__rankScore) - safeNumber(left.__rankScore);
+          if (rankDiff !== 0) return rankDiff;
+          return safeNumber(left.__hoursAgo, 9999) - safeNumber(right.__hoursAgo, 9999);
+        })
     );
-    const articles = dedupeArticlesByTitle([
-      ...policyFirst,
-      ...payload.articles,
-    ]).slice(0, 12);
-    const scores = scoreSentimentsWithRules(articles.map((article) => article.title || ''));
-    const mappedPromises = articles.map(async (article, index) => ({
+
+    const recentFirst = ranked.filter((article) => safeNumber(article.__hoursAgo, 9999) <= RECENT_WINDOW_HOURS);
+    const older = ranked.filter((article) => safeNumber(article.__hoursAgo, 9999) > RECENT_WINDOW_HOURS);
+    const selected = (recentFirst.length > 0 ? [...recentFirst, ...older] : ranked).slice(0, 12);
+
+    const scores = scoreSentimentsWithRules(selected.map((article) => article.title || ''));
+    const mappedPromises = selected.map(async (article, index) => ({
       title: article.title || '',
       summary: article.description || article.content || '',
       url: article.url || '',
       source: await resolveArticleSourceLabel(article.url, article.source?.name || 'NewsAPI'),
       sentiment: scores[index] ?? 0,
-      hoursAgo: hoursAgoFromDate(article.publishedAt),
-      theme: detectMacroTheme(`${article.title || ''} ${article.description || ''}`),
+      hoursAgo: safeNumber(article.__hoursAgo, hoursAgoFromDate(article.publishedAt)),
+      theme: article.__theme || detectMacroTheme(`${article.title || ''} ${article.description || ''}`),
       scope: 'macro',
     }));
-    return await Promise.all(mappedPromises);
+
+    const mapped = await Promise.all(mappedPromises);
+    const hasVeryRecent = mapped.some((article) => safeNumber(article.hoursAgo, 9999) <= FRESH_NEWS_MIN_HOURS);
+
+    if (!hasVeryRecent || mapped.length < 6) {
+      const googleSupplement = await fetchGoogleNewsRssQuery('fed OR rba OR rate decision OR geopolitics OR war OR sanctions OR oil markets');
+      return dedupeArticlesByTitle([...googleSupplement, ...mapped])
+        .sort((left, right) => safeNumber(left.hoursAgo, 9999) - safeNumber(right.hoursAgo, 9999))
+        .slice(0, 12);
+    }
+
+    return mapped;
   } catch (error) {
     console.error('NewsAPI macro news fetch failed:', error.message);
     return [];
@@ -153,14 +196,17 @@ async function fetchGoogleNewsRssQuery(queryStr) {
         summary: '',
         url: link,
         source: 'Google News',
-        sentiment: 0,
         hoursAgo: publishMs > 0 ? Math.max(0, Math.round((Date.now() - publishMs) / 3600000)) : 0,
       });
     }
 
-    const resolvedPromises = items.map(async (item) => ({
+    const scores = scoreSentimentsWithRules(items.map((item) => item.title || ''));
+    const resolvedPromises = items.map(async (item, index) => ({
       ...item,
-      source: await resolveArticleSourceLabel(item.url, item.source)
+      source: await resolveArticleSourceLabel(item.url, item.source),
+      sentiment: scores[index] ?? 0,
+      theme: detectMacroTheme(`${item.title || ''} ${item.summary || ''}`),
+      scope: 'macro',
     }));
     return await Promise.all(resolvedPromises);
   } catch {

@@ -128,6 +128,83 @@ function generateMockMarketData(ticker) {
     },
   ];
 
+  const sectorSeriesSeed = [
+    { sector: 'Technology', proxyTicker: 'XLK', base: 100 },
+    { sector: 'Financials', proxyTicker: 'XLF', base: 100 },
+    { sector: 'Healthcare', proxyTicker: 'XLV', base: 100 },
+    { sector: 'Energy', proxyTicker: 'XLE', base: 100 },
+    { sector: 'Industrials', proxyTicker: 'XLI', base: 100 },
+    { sector: 'Consumer Discretionary', proxyTicker: 'XLY', base: 100 },
+  ];
+
+  const sectorTrends = sectorSeriesSeed.map((item) => {
+    let value = item.base * (1 + rand(-0.04, 0.04));
+    const history = [];
+    for (let index = 64; index >= 0; index -= 1) {
+      value = value * (1 + rand(-0.018, 0.02));
+      const date = new Date();
+      date.setDate(date.getDate() - index);
+      history.push({
+        date: date.toISOString().split('T')[0],
+        close: parseFloat(value.toFixed(4)),
+      });
+    }
+
+    const first = history[0]?.close || 0;
+    const last = history[history.length - 1]?.close || first;
+    const changePercent = first > 0 ? ((last - first) / first) * 100 : 0;
+
+    return {
+      sector: item.sector,
+      proxyTicker: item.proxyTicker,
+      trend: changePercent > 1 ? 'BULLISH' : changePercent < -1 ? 'BEARISH' : 'NEUTRAL',
+      changePercent: parseFloat(changePercent.toFixed(2)),
+      history,
+    };
+  });
+
+  const isAsx = String(ticker || '').toUpperCase().endsWith('.AX');
+  let benchmarkValue = 100;
+  const benchmarkHistory = [];
+  for (let index = 64; index >= 0; index -= 1) {
+    benchmarkValue = benchmarkValue * (1 + rand(-0.012, 0.014));
+    const date = new Date();
+    date.setDate(date.getDate() - index);
+    benchmarkHistory.push({
+      date: date.toISOString().split('T')[0],
+      close: parseFloat(benchmarkValue.toFixed(4)),
+    });
+  }
+  const benchmarkFirst = benchmarkHistory[0]?.close || 0;
+  const benchmarkLast = benchmarkHistory[benchmarkHistory.length - 1]?.close || benchmarkFirst;
+  const benchmarkChange = benchmarkFirst > 0 ? ((benchmarkLast - benchmarkFirst) / benchmarkFirst) * 100 : 0;
+  const benchmarkTrend = {
+    name: isAsx ? 'ASX 200' : 'S&P 500',
+    benchmarkTicker: isAsx ? '^AXJO' : '^GSPC',
+    market: isAsx ? 'ASX' : 'US',
+    trend: benchmarkChange > 1 ? 'BULLISH' : benchmarkChange < -1 ? 'BEARISH' : 'NEUTRAL',
+    changePercent: parseFloat(benchmarkChange.toFixed(2)),
+    history: benchmarkHistory,
+  };
+
+  const peers = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL'].filter((symbol) => symbol !== ticker).slice(0, 5);
+  const peerComparisons = peers.map((symbol) => ({
+    symbol,
+    name: `${symbol} Corp.`,
+    marketCap: Math.floor(rand(2e11, 3.5e12)),
+    pe: parseFloat(rand(12, 40).toFixed(2)),
+    eps: parseFloat(rand(1, 18).toFixed(2)),
+    roe: parseFloat(rand(0.06, 0.45).toFixed(4)),
+    return3m: parseFloat(rand(-12, 18).toFixed(2)),
+    rsi: parseFloat(rand(32, 72).toFixed(1)),
+    latestVolume: Math.floor(rand(8000000, 120000000)),
+    avgVolume20: Math.floor(rand(7000000, 95000000)),
+    volumeRatio: parseFloat(rand(0.65, 1.85).toFixed(2)),
+    sentiment: parseFloat(rand(-0.4, 0.5).toFixed(2)),
+    fundamentalScore: parseFloat(rand(-0.35, 0.85).toFixed(2)),
+    tradingScore: parseFloat(rand(-0.45, 0.9).toFixed(2)),
+  }));
+
   return {
     ticker,
     name: stockInfo.name,
@@ -161,12 +238,16 @@ function generateMockMarketData(ticker) {
       targetMean: parseFloat(targetMean.toFixed(2)),
       upside: parseFloat((((targetMean - price) / price) * 100).toFixed(1)),
     },
+    peers,
+    peerComparisons,
     news,
     macroContext: buildMacroContext({
       ticker,
       sector: stockInfo.sector,
       macroNews,
     }),
+    sectorTrends,
+    benchmarkTrend,
     priceHistory,
     technicalIndicators: calculateAllIndicators(priceHistory),
     collectedAt: new Date().toISOString(),

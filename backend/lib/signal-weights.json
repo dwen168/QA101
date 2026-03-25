@@ -114,7 +114,7 @@
     "eda_trend_weakness": {
       "points": -0.5,
       "description": "Calibrated weight for eda_trend_weakness"
-    }
+    },
     "macro_risk_bullish": {
       "points": 0.5,
       "description": "Calibrated weight for macro_risk_bullish"

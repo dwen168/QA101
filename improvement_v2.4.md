@@ -122,3 +122,60 @@ Payload size is capped at 9 MB server-side; the UI also validates before sending
 - **`backend/data/reports.db-shm`** — Shared-memory WAL index (auto-managed by SQLite, not committed).
 - **`backend/data/reports.db-wal`** — Write-ahead log (merged back into `.db` on checkpoint, not committed).
 
+---
+
+## Post-v2.4 Functional Additions (Market Intelligence UX/Data Expansion)
+
+### 1. Macro News Freshness Upgrade
+- **Module Affected**: `skills/market-intelligence/scripts/modules/api-news.js`
+- **Functionality**:
+  - Upgraded macro news ranking to prioritize recency and event relevance (especially policy + geopolitics).
+  - Added fallback supplementation from Google News RSS when macro coverage is stale or sparse.
+  - Ensured fallback items carry normalized `theme`, `sentiment`, and `scope` fields.
+
+### 2. Sector Trend Data (3-Month)
+- **Module Affected**: `skills/market-intelligence/scripts/modules/market-data.js`
+- **Functionality**:
+  - Added sector proxy trend ingestion via Yahoo Finance ETF proxies (e.g., XLK, XLF, XLV, XLE).
+  - Extended sector coverage to include **Materials** (`XLB`) and **Mining** (`XME`).
+  - Exposed `sectorTrends` in market-intelligence outputs across Finnhub/Yahoo/Alpha paths.
+
+### 3. Market Benchmark Overlay (Mountain)
+- **Modules Affected**:
+  - `skills/market-intelligence/scripts/modules/market-data.js`
+  - `frontend/js/app.js`
+- **Functionality**:
+  - Added benchmark selection by listing market context:
+    - ASX assets → `^AXJO` (ASX 200)
+    - US assets → `^GSPC` (S&P 500)
+  - Introduced a benchmark mountain series and merged it into the same sector comparison chart for visual relative-performance context.
+  - Added chart interaction controls:
+    - Legend click toggles visibility per series.
+    - `All` / `Focus` quick controls (`Focus` = benchmark + primary sector).
+
+### 4. Peer Comparison Cards (Real Metrics)
+- **Modules Affected**:
+  - `skills/market-intelligence/scripts/modules/market-data.js`
+  - `skills/market-intelligence/scripts/modules/mock.js`
+  - `frontend/js/app.js`
+- **Functionality**:
+  - Implemented backend `peerComparisons` generation using live peer metrics.
+  - Two side-by-side cards now render ranked peer tables:
+    - **Fundamentals**: PE, EPS, Market Cap, ROE
+    - **Trading**: 3M Return, RSI, Sentiment, Volume/Avg
+  - Updated ticker column UX to show **symbol + company name**.
+  - Converted Chinese helper text in peer cards to English.
+
+### 5. ASX Peer Availability Fallback
+- **Module Affected**: `skills/market-intelligence/scripts/modules/market-data.js`
+- **Functionality**:
+  - Added sector-based ASX peer fallback universe when Finnhub peer endpoint returns empty.
+  - Added a default ASX fallback basket if sector-specific mapping is unavailable.
+  - This resolves blank peer comparison cards for `.AX` tickers.
+
+### 6. Runtime Stability Fix
+- **Module Affected**: `skills/market-intelligence/scripts/modules/market-data.js`
+- **Fix**:
+  - Resolved `Cannot access 'sectorLabel' before initialization` by correcting variable declaration order in the Yahoo data path.
+
+

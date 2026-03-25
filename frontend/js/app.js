@@ -886,6 +886,8 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
   const macroColor = macroScore > 0.1 ? 'var(--green)' : macroScore < -0.1 ? 'var(--red)' : 'var(--amber)';
   const macroPct = ((macroScore + 1) / 2 * 100).toFixed(0);
   const macroNews = Array.isArray(macro.news) ? macro.news : [];
+  const sectorTrends = Array.isArray(d.sectorTrends) ? d.sectorTrends : [];
+  const benchmarkTrend = d.benchmarkTrend && Array.isArray(d.benchmarkTrend.history) ? d.benchmarkTrend : null;
   const monetaryPolicy = macro.monetaryPolicy || {};
   const renderMacroThemeChip = (theme) => `<span class="detail-chip macro-theme-chip">${String(theme || 'GENERAL_MACRO').replace(/_/g, ' ')}</span>`;
   const renderPolicyChip = (policy) => {
@@ -1133,6 +1135,315 @@ function renderMarketIntelligence(d, llm, panel, dataSource = 'unknown', usedFal
     </div>
   `;
   panel.appendChild(advCard);
+
+  const peerComparisons = Array.isArray(d.peerComparisons) ? d.peerComparisons : [];
+  const peerSymbols = Array.isArray(d.peers) ? d.peers.slice(0, 8) : [];
+  if (peerComparisons.length > 0 || peerSymbols.length > 0) {
+    const peerCompareWrap = document.createElement('div');
+    peerCompareWrap.className = 'fade-in';
+    peerCompareWrap.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:12px';
+    const fmtCompact = (value) => {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric <= 0) return '—';
+      if (numeric >= 1e12) return `${(numeric / 1e12).toFixed(2)}T`;
+      if (numeric >= 1e9) return `${(numeric / 1e9).toFixed(2)}B`;
+      if (numeric >= 1e6) return `${(numeric / 1e6).toFixed(2)}M`;
+      return Math.round(numeric).toLocaleString('en-US');
+    };
+
+    const fundamentalsSorted = [...peerComparisons]
+      .sort((left, right) => Number(right.fundamentalScore || 0) - Number(left.fundamentalScore || 0))
+      .slice(0, 6);
+
+    const tradingSorted = [...peerComparisons]
+      .sort((left, right) => Number(right.tradingScore || 0) - Number(left.tradingScore || 0))
+      .slice(0, 6);
+
+    const fallbackRows = peerSymbols
+      .map((symbol, index) => `<div style="display:grid;grid-template-columns:26px 1fr 84px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)"><span style="font-size:10px;color:var(--text3);font-family:var(--mono)">${index + 1}</span><span style="font-size:12px;color:var(--text);font-family:var(--mono)">${symbol}</span><span style="font-size:10px;color:var(--amber);font-family:var(--mono)">loading</span></div>`)
+      .join('');
+
+    const fundamentalRows = fundamentalsSorted.length > 0
+      ? fundamentalsSorted.map((item, index) => `
+        <div style="display:grid;grid-template-columns:26px 1fr 54px 54px 62px 54px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:10px;color:var(--text3);font-family:var(--mono)">${index + 1}</span>
+          <span style="display:flex;flex-direction:column;line-height:1.2">
+            <span style="font-size:12px;color:var(--text);font-family:var(--mono)">${item.symbol}</span>
+            <span style="font-size:10px;color:var(--text3)">${item.name || item.symbol}</span>
+          </span>
+          <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">${Number(item.pe || 0) > 0 ? Number(item.pe).toFixed(1) : '—'}</span>
+          <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">${Number(item.eps || 0) !== 0 ? Number(item.eps).toFixed(2) : '—'}</span>
+          <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">${fmtCompact(item.marketCap)}</span>
+          <span style="font-size:11px;color:${Number(item.roe || 0) >= 0.12 ? 'var(--green)' : 'var(--text2)'};font-family:var(--mono)">${Number(item.roe || 0) ? `${(Number(item.roe) * 100).toFixed(1)}%` : '—'}</span>
+        </div>
+      `).join('')
+      : fallbackRows;
+
+    const tradingRows = tradingSorted.length > 0
+      ? tradingSorted.map((item, index) => `
+        <div style="display:grid;grid-template-columns:26px 1fr 62px 54px 62px 62px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:10px;color:var(--text3);font-family:var(--mono)">${index + 1}</span>
+          <span style="display:flex;flex-direction:column;line-height:1.2">
+            <span style="font-size:12px;color:var(--text);font-family:var(--mono)">${item.symbol}</span>
+            <span style="font-size:10px;color:var(--text3)">${item.name || item.symbol}</span>
+          </span>
+          <span style="font-size:11px;color:${Number(item.return3m || 0) >= 0 ? 'var(--green)' : 'var(--red)'};font-family:var(--mono)">${Number(item.return3m || 0) >= 0 ? '+' : ''}${Number(item.return3m || 0).toFixed(2)}%</span>
+          <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">${Number.isFinite(Number(item.rsi)) ? Number(item.rsi).toFixed(1) : '—'}</span>
+          <span style="font-size:11px;color:var(--text2);font-family:var(--mono)">${Number.isFinite(Number(item.sentiment)) ? `${Number(item.sentiment) > 0 ? '+' : ''}${Number(item.sentiment).toFixed(2)}` : '—'}</span>
+          <span style="font-size:11px;color:${Number(item.volumeRatio || 0) >= 1 ? 'var(--green)' : 'var(--text2)'};font-family:var(--mono)">${Number(item.volumeRatio || 0) ? `${Number(item.volumeRatio).toFixed(2)}x` : '—'}</span>
+        </div>
+      `).join('')
+      : fallbackRows;
+
+    const cardLeft = document.createElement('div');
+    cardLeft.className = 'card';
+    cardLeft.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">Peers Compare · Fundamentals</span>
+        <span style="font-size:10px;color:var(--text3);font-family:var(--mono)">ranked by fundamentalScore</span>
+      </div>
+      <div style="display:grid;grid-template-columns:26px 1fr 54px 54px 62px 54px;gap:8px;font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border)">
+        <span>#</span><span>Ticker</span><span>PE</span><span>EPS</span><span>MCap</span><span>ROE</span>
+      </div>
+      <div>${fundamentalRows}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:10px;line-height:1.5">Use this view for valuation and earnings quality: lower PE, stronger ROE, and steadier EPS usually rank higher.</div>
+    `;
+
+    const cardRight = document.createElement('div');
+    cardRight.className = 'card';
+    cardRight.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">Peers Compare · Trading</span>
+        <span style="font-size:10px;color:var(--text3);font-family:var(--mono)">ranked by tradingScore</span>
+      </div>
+      <div style="display:grid;grid-template-columns:26px 1fr 62px 54px 62px 62px;gap:8px;font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border)">
+        <span>#</span><span>Ticker</span><span>3M</span><span>RSI</span><span>Sent</span><span>Vol/Avg</span>
+      </div>
+      <div>${tradingRows}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:10px;line-height:1.5">Use this view for short-term strength: 3M momentum, RSI, and volume expansion help identify crowded trading direction.</div>
+    `;
+
+    peerCompareWrap.appendChild(cardLeft);
+    peerCompareWrap.appendChild(cardRight);
+    panel.appendChild(peerCompareWrap);
+  }
+
+  if (sectorTrends.length > 0 || (benchmarkTrend && benchmarkTrend.history.length > 0)) {
+    const sectorCard = document.createElement('div');
+    sectorCard.className = 'card fade-in';
+    sectorCard.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">Sector vs Market (3-Month)</span>
+        <span style="font-size:10px;color:var(--text3);font-family:var(--mono)">${benchmarkTrend ? `${benchmarkTrend.market} · ${benchmarkTrend.name}` : `${d.sector || 'Unknown'} Focus`}</span>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:6px;margin-bottom:6px">
+        <button id="chart-sector-show-all" style="font-size:10px;font-family:var(--mono);padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:rgba(59,130,246,0.12);color:var(--cyan);cursor:pointer">All</button>
+        <button id="chart-sector-show-focus" style="font-size:10px;font-family:var(--mono);padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:rgba(255,255,255,0.03);color:var(--text2);cursor:pointer">Focus</button>
+      </div>
+      <div style="margin-top:2px;margin-bottom:8px;font-size:10px;color:var(--text3);font-family:var(--mono)">Click legend to show/hide benchmark or any sector line.</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;margin-bottom:10px">
+        ${benchmarkTrend ? `
+          <span class="detail-chip" style="border-color:rgba(59,130,246,0.25)">
+            ${benchmarkTrend.name}: <span style="color:${Number(benchmarkTrend.changePercent || 0) >= 0 ? 'var(--green)' : 'var(--red)'}">${Number(benchmarkTrend.changePercent || 0) >= 0 ? '+' : ''}${Number(benchmarkTrend.changePercent || 0).toFixed(2)}%</span>
+          </span>
+        ` : ''}
+        ${sectorTrends.map((item) => `
+          <span class="detail-chip" style="border-color:rgba(59,130,246,0.2)">
+            ${item.sector}: <span style="color:${Number(item.changePercent || 0) >= 0 ? 'var(--green)' : 'var(--red)'}">${Number(item.changePercent || 0) >= 0 ? '+' : ''}${Number(item.changePercent || 0).toFixed(2)}%</span>
+          </span>
+        `).join('')}
+      </div>
+      <div class="chart-canvas-wrap" style="height:280px"><canvas id="chart-sector-trends"></canvas></div>
+    `;
+    panel.appendChild(sectorCard);
+
+    setTimeout(() => {
+      const canvas = document.getElementById('chart-sector-trends');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const allDates = Array.from(new Set([
+        ...sectorTrends.flatMap((item) => Array.isArray(item.history) ? item.history.map((point) => point.date) : []),
+        ...(benchmarkTrend && Array.isArray(benchmarkTrend.history) ? benchmarkTrend.history.map((point) => point.date) : []),
+      ])).sort();
+      if (allDates.length === 0) return;
+
+      const palette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#22c55e', '#f97316'];
+      const datasets = [];
+
+      if (benchmarkTrend && Array.isArray(benchmarkTrend.history) && benchmarkTrend.history.length > 0) {
+        const benchmarkByDate = new Map(benchmarkTrend.history.map((point) => [point.date, Number(point.close)]));
+        let benchmarkBaseline = null;
+        const normalizedBenchmark = allDates.map((date) => {
+          const close = benchmarkByDate.get(date);
+          if (!Number.isFinite(close) || close <= 0) return null;
+          if (!Number.isFinite(benchmarkBaseline) || benchmarkBaseline <= 0) benchmarkBaseline = close;
+          return benchmarkBaseline > 0 ? ((close - benchmarkBaseline) / benchmarkBaseline) * 100 : 0;
+        });
+
+        const isUp = Number(benchmarkTrend.changePercent || 0) >= 0;
+        const mountainColor = isUp ? '#10b981' : '#ef4444';
+        const mountainFill = ctx.createLinearGradient(0, 0, 0, 280);
+        mountainFill.addColorStop(0, isUp ? 'rgba(16,185,129,0.22)' : 'rgba(239,68,68,0.22)');
+        mountainFill.addColorStop(1, isUp ? 'rgba(16,185,129,0.01)' : 'rgba(239,68,68,0.01)');
+
+        datasets.push({
+          label: `${benchmarkTrend.name} (${benchmarkTrend.benchmarkTicker})`,
+          data: normalizedBenchmark,
+          borderColor: mountainColor,
+          backgroundColor: mountainFill,
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 2,
+          tension: 0.22,
+          fill: true,
+          spanGaps: true,
+        });
+      }
+
+      const sectorDatasets = sectorTrends.slice(0, 8).map((item, index) => {
+        const history = Array.isArray(item.history) ? item.history : [];
+        const byDate = new Map(history.map((point) => [point.date, Number(point.close)]));
+        let baseline = null;
+        const normalizedSeries = allDates.map((date) => {
+          const close = byDate.get(date);
+          if (!Number.isFinite(close) || close <= 0) return null;
+          if (!Number.isFinite(baseline) || baseline <= 0) baseline = close;
+          return baseline > 0 ? ((close - baseline) / baseline) * 100 : 0;
+        });
+
+        return {
+          label: `${item.sector} (${item.proxyTicker})`,
+          data: normalizedSeries,
+          borderColor: palette[index % palette.length],
+          backgroundColor: palette[index % palette.length],
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 2,
+          tension: 0.25,
+          fill: false,
+          spanGaps: true,
+        };
+      });
+
+      datasets.push(...sectorDatasets);
+
+      currentCharts['sector-trends'] = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: allDates,
+          datasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: {
+            mode: 'index',
+            intersect: false,
+          },
+          plugins: {
+            legend: {
+              position: 'bottom',
+              onClick: (event, legendItem, legend) => {
+                const chart = legend.chart;
+                const datasetIndex = legendItem.datasetIndex;
+                if (typeof datasetIndex !== 'number') return;
+                const visible = chart.isDatasetVisible(datasetIndex);
+                chart.setDatasetVisibility(datasetIndex, !visible);
+                chart.update();
+              },
+              labels: {
+                color: '#7a8fb8',
+                font: { size: 10, family: "'DM Mono', monospace" },
+                boxWidth: 10,
+                padding: 8,
+              },
+            },
+            tooltip: {
+              callbacks: {
+                label: (context) => {
+                  const value = Number(context.parsed.y);
+                  if (!Number.isFinite(value)) return `${context.dataset.label}: —`;
+                  return `${context.dataset.label}: ${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              ticks: {
+                color: '#3d5080',
+                font: { size: 10, family: "'DM Mono', monospace" },
+                maxTicksLimit: 8,
+              },
+              grid: { color: 'rgba(59,130,246,0.04)' },
+              border: { color: 'rgba(59,130,246,0.1)' },
+            },
+            y: {
+              ticks: {
+                color: '#3d5080',
+                font: { size: 10, family: "'DM Mono', monospace" },
+                callback: (value) => `${Number(value).toFixed(0)}%`,
+              },
+              grid: { color: 'rgba(59,130,246,0.04)' },
+              border: { color: 'rgba(59,130,246,0.1)' },
+            },
+          },
+        },
+      });
+
+      const toggleAllBtn = document.getElementById('chart-sector-show-all');
+      const toggleFocusBtn = document.getElementById('chart-sector-show-focus');
+      const normalizedPrimarySector = String(d.sector || '').toLowerCase();
+      const hasBenchmark = !!(benchmarkTrend && benchmarkTrend.history && benchmarkTrend.history.length > 0);
+
+      const setToggleStyle = (activeMode) => {
+        if (toggleAllBtn) {
+          toggleAllBtn.style.background = activeMode === 'all' ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.03)';
+          toggleAllBtn.style.color = activeMode === 'all' ? 'var(--cyan)' : 'var(--text2)';
+        }
+        if (toggleFocusBtn) {
+          toggleFocusBtn.style.background = activeMode === 'focus' ? 'rgba(59,130,246,0.12)' : 'rgba(255,255,255,0.03)';
+          toggleFocusBtn.style.color = activeMode === 'focus' ? 'var(--cyan)' : 'var(--text2)';
+        }
+      };
+
+      const applyVisibilityAll = () => {
+        const chart = currentCharts['sector-trends'];
+        if (!chart) return;
+        chart.data.datasets.forEach((_, datasetIndex) => chart.setDatasetVisibility(datasetIndex, true));
+        chart.update();
+        setToggleStyle('all');
+      };
+
+      const applyVisibilityFocus = () => {
+        const chart = currentCharts['sector-trends'];
+        if (!chart) return;
+
+        chart.data.datasets.forEach((dataset, datasetIndex) => {
+          const label = String(dataset?.label || '').toLowerCase();
+          const isBenchmarkDataset = hasBenchmark && label.includes(String(benchmarkTrend?.benchmarkTicker || '').toLowerCase());
+          const isPrimarySectorDataset = normalizedPrimarySector
+            ? label.includes(`${normalizedPrimarySector} (`) || label.startsWith(normalizedPrimarySector)
+            : false;
+          chart.setDatasetVisibility(datasetIndex, isBenchmarkDataset || isPrimarySectorDataset);
+        });
+
+        const hasVisibleDataset = chart.data.datasets.some((_, datasetIndex) => chart.isDatasetVisible(datasetIndex));
+        if (!hasVisibleDataset) {
+          chart.data.datasets.forEach((_, datasetIndex) => chart.setDatasetVisibility(datasetIndex, true));
+          setToggleStyle('all');
+        } else {
+          setToggleStyle('focus');
+        }
+        chart.update();
+      };
+
+      toggleAllBtn?.addEventListener('click', applyVisibilityAll);
+      toggleFocusBtn?.addEventListener('click', applyVisibilityFocus);
+    }, 60);
+  }
 
   // LLM analysis summary
   if (llm?.summary) {
