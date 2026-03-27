@@ -61,8 +61,8 @@ QA101/
 │       └── references/multi-factor-model.md
 ├── backend/
 │   ├── package.json
-│   ├── server.js                 # Express HTTP API
-│   ├── mcp-server.js             # MCP stdio server
+│   ├── app.js                    # Shared Express app for local and serverless runtime
+│   ├── server.js                 # Local HTTP launcher
 │   └── lib/
 │       ├── chat.js               # Chat orchestration
 │       ├── config.js             # Env/config loader
@@ -75,25 +75,18 @@ QA101/
 ```
 
 Runtime architecture:
-- Frontend (`frontend/index.html`) calls the HTTP API on `backend/server.js`.
+- Frontend (`frontend/index.html`) calls `/api` endpoints.
 - Chat orchestration in `backend/lib/chat.js` and `backend/lib/pipeline.js` routes requests across skills.
 - Skill instructions are loaded from `skills/*/SKILL.md`, while executable logic runs from `skills/*/scripts/index.js`.
-- `backend/mcp-server.js` exposes the same capabilities as MCP tools, reusing the backend skill modules.
+- `backend/app.js` is the shared Express app used by both local dev (`backend/server.js`) and Vercel serverless (`api/[...route].js`).
 
 ## Setup
 
 ### Quick start (from repo root)
-Terminal 1:
 ```bash
 cd backend
 npm install
 node server.js
-```
-
-Terminal 2:
-```bash
-cd backend
-npm run mcp
 ```
 
 Then open: http://localhost:3001/
@@ -162,23 +155,14 @@ This starts the API and serves the frontend at:
 - http://localhost:3001/
 - Health check: http://localhost:3001/api/health
 
-### 4. Start the MCP server (optional, separate terminal)
-If you want to expose the QuantBot skills as MCP tools for compatible AI clients, you can start the MCP server. Open a second terminal, go to `backend/`, then run:
-```bash
-npm run mcp
-```
-
-This is not required if you are using the browser-based UI.
-
-### 5. Open the frontend
+### 4. Open the frontend
 Open http://localhost:3001/ in your browser.
 
 ## How It Works
 
 ### Running modes
-- Browser app mode: requires `node server.js`
-- MCP client mode: requires `npm run mcp`
-- Full local demo (recommended): run both commands in parallel using two terminals
+- Browser app mode: `node server.js`
+- Vercel serverless mode: deploy the repo to Vercel using `vercel.json` + `api/[...route].js`
 
 ### Agent Skills Pattern
 Each skill follows the [agentskills.io spec](https://agentskills.io/specification):
@@ -188,7 +172,7 @@ Each skill follows the [agentskills.io spec](https://agentskills.io/specificatio
 
 The configured LLM provider (DeepSeek or Ollama) receives each `SKILL.md` as part of its system prompt — this is how it "learns" what each skill does and how to execute it.
 
-The executable skill logic lives directly in each skill folder under `scripts/`. Both the Express API and the MCP server import those script modules, so the skills remain reusable across transports while matching the agent skill folder pattern.
+The executable skill logic lives directly in each skill folder under `scripts/`. The local server and Vercel serverless function both import the same script modules.
 
 ### Skill 1: market-intelligence
 - Validates ticker symbol
@@ -314,31 +298,28 @@ touch skills/my-new-skill/SKILL.md
 | GET | `/api/health` | Health check |
 | GET | `/api/llm/models` | Model list for `deepseek` or `ollama` |
 
-## MCP Tools
+## Vercel Deployment
 
-The MCP server exposes these tools over stdio:
+This project now runs in a serverless model on Vercel:
+- API: `api/[...route].js` (Express app from `backend/app.js`)
+- Frontend: served from `frontend/` via rewrites in `vercel.json`
 
-- `market_intelligence` — Single ticker analysis
-- `eda_visual_analysis` — Visual analysis from market data
-- `trade_recommendation` — Trade signal for single stock
-- `full_stock_analysis` — Full pipeline for single stock
-- `portfolio_optimization` — Multi-stock ranking and sector rotation
-- `full_portfolio_analysis` — Full portfolio analysis pipeline
-
-Example Claude Desktop / VS Code MCP config on Windows:
-
-```json
-{
-    "mcpServers": {
-        "quantbot": {
-            "command": "node",
-            "args": [
-                "e:/WorkSource/QA101/backend/mcp-server.js"
-            ]
-        }
-    }
-}
+Deploy steps:
+```bash
+npm install --prefix backend
+vercel
 ```
+
+Required environment variables on Vercel:
+- `LLM_PROVIDER`
+- `DEEPSEEK_API_KEY` (if using DeepSeek)
+- `DEEPSEEK_BASE_URL`
+- `DEEPSEEK_MODEL`
+- `OLLAMA_BASE_URL` (if using Ollama over reachable endpoint)
+- `OLLAMA_MODEL`
+- `ALPHA_VANTAGE_API_KEY`
+- `FINNHUB_API_KEY`
+- `NEWS_API_KEY`
 
 ## Disclaimer
 This is a demo application for educational purposes only.

@@ -32,13 +32,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = '/api';
 const DEFAULT_MODELS = {
   deepseek: 'deepseek-chat',
+  gemini: 'gemini-2.5-flash-lite',
   ollama: 'qwen3.5:9b',
 };
 const MODEL_PRESETS = {
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+  gemini: ['gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'],
   ollama: [],
 };
 const STORAGE_KEYS = {
@@ -55,6 +57,7 @@ let llmConfig = {
 };
 let llmModelCache = {
   deepseek: [...MODEL_PRESETS.deepseek],
+  gemini: [...MODEL_PRESETS.gemini],
   ollama: [...MODEL_PRESETS.ollama],
 };
 
@@ -94,6 +97,11 @@ function updateModelOptions(provider) {
     if (options.length === 0 && llmConfig.provider === 'ollama' && llmConfig.model) {
       options = [llmConfig.model];
     }
+  } else if (provider === 'gemini') {
+    options = Array.from(new Set([
+      ...(llmModelCache.gemini || []),
+      llmConfig.model,
+    ].filter(Boolean)));
   } else {
     options = Array.from(new Set([
       ...(llmModelCache.deepseek || []),
@@ -111,7 +119,7 @@ function updateModelOptions(provider) {
 }
 
 function applyLlmConfig(provider, model) {
-  const resolvedProvider = provider === 'ollama' ? 'ollama' : 'deepseek';
+  const resolvedProvider = ['deepseek', 'ollama', 'gemini'].includes(provider) ? provider : 'deepseek';
   const resolvedModel = String(model || '').trim() || DEFAULT_MODELS[resolvedProvider];
 
   llmModelCache[resolvedProvider] = Array.from(new Set([
@@ -145,7 +153,9 @@ async function refreshModelsForProvider(provider) {
 
 async function handleLlmProviderChange() {
   const providerEl = document.getElementById('llm-provider');
-  const nextProvider = providerEl?.value === 'ollama' ? 'ollama' : 'deepseek';
+  const nextProvider = ['deepseek', 'ollama', 'gemini'].includes(providerEl?.value)
+    ? providerEl.value
+    : 'deepseek';
   await refreshModelsForProvider(nextProvider);
   const candidates = llmModelCache[nextProvider] || [];
   const nextModel = candidates[0]
@@ -154,7 +164,8 @@ async function handleLlmProviderChange() {
 }
 
 function handleLlmModelChange() {
-  const provider = document.getElementById('llm-provider')?.value === 'ollama' ? 'ollama' : 'deepseek';
+  const selectedProvider = document.getElementById('llm-provider')?.value;
+  const provider = ['deepseek', 'ollama', 'gemini'].includes(selectedProvider) ? selectedProvider : 'deepseek';
   const model = document.getElementById('llm-model')?.value;
   applyLlmConfig(provider, model);
 }
@@ -164,7 +175,8 @@ async function initializeLlmConfig() {
   const savedModel = localStorage.getItem(STORAGE_KEYS.model);
 
   if (savedProvider || savedModel) {
-    await refreshModelsForProvider(savedProvider === 'ollama' ? 'ollama' : 'deepseek');
+    const provider = ['deepseek', 'ollama', 'gemini'].includes(savedProvider) ? savedProvider : 'deepseek';
+    await refreshModelsForProvider(provider);
     applyLlmConfig(savedProvider, savedModel);
     return;
   }
@@ -172,7 +184,10 @@ async function initializeLlmConfig() {
   try {
     const res = await fetch(`${API_BASE}/health`);
     const data = await res.json();
-    await refreshModelsForProvider(data.llm?.provider === 'ollama' ? 'ollama' : 'deepseek');
+    const provider = ['deepseek', 'ollama', 'gemini'].includes(data.llm?.provider)
+      ? data.llm.provider
+      : 'deepseek';
+    await refreshModelsForProvider(provider);
     applyLlmConfig(data.llm?.provider, data.llm?.model);
   } catch {
     await refreshModelsForProvider('deepseek');
@@ -2502,8 +2517,24 @@ document.addEventListener('click', closeInfoMenu);
 document.addEventListener('click', closeReportsMenu);
 
 // ─────────────────────────────────────────────
-//  Reports Library (SQLite-backed)
+//  Reports Library (localStorage-backed)
 // ─────────────────────────────────────────────
+
+const REPORTS_STORAGE_KEY = 'quantbot.reports.v1';
+
+function readLocalReports() {
+  try {
+    const raw = localStorage.getItem(REPORTS_STORAGE_KEY);
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalReports(reports) {
+  localStorage.setItem(REPORTS_STORAGE_KEY, JSON.stringify(reports));
+}
 
 function updateReportsBadge(count) {
   const badge = document.getElementById('reports-count');
@@ -2554,9 +2585,7 @@ async function loadReportsList() {
     menuContainer.innerHTML = '<div class="reports-menu-empty">Loading...</div>';
   }
   try {
-    const res = await fetch(`${API_BASE}/reports`);
-    if (!res.ok) throw new Error('Failed to load reports');
-    const reports = await res.json();
+    const reports = readLocalReports().sort((a, b) => Number(b.id) - Number(a.id));
 
     updateReportsBadge(reports.length);
     renderReportsMenu(reports);
@@ -2590,15 +2619,18 @@ async function saveCurrentReport() {
   if (!label) return; // user cancelled
 
   try {
-    const res = await fetch(`${API_BASE}/reports`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ticker, label, html }),
-    });
-    const data = await readJsonResponse(res);
-    if (!res.ok) {
-      throw new Error(data.error || `Save failed (${res.status})`);
-    }
+    const reports = readLocalReports();
+    const nextId = reports.length ? Math.max(...reports.map((item) => Number(item.id) || 0)) + 1 : 1;
+    const data = {
+      id: nextId,
+      ticker,
+      label,
+      html,
+      created_at: new Date().toISOString(),
+    };
+
+    reports.push(data);
+    writeLocalReports(reports);
 
     if (data.id) {
       showToast(`✅ Report saved (ID: ${data.id})`);
@@ -2619,9 +2651,8 @@ async function saveCurrentReport() {
 
 async function restoreReport(id) {
   try {
-    const res = await fetch(`${API_BASE}/reports/${id}`);
-    if (!res.ok) throw new Error('Report not found');
-    const report = await res.json();
+    const report = readLocalReports().find((item) => Number(item.id) === Number(id));
+    if (!report) throw new Error('Report not found');
 
     const panel = document.getElementById('analysis-panel');
     const welcome = document.getElementById('welcome-state');
@@ -2638,9 +2669,11 @@ async function restoreReport(id) {
 async function deleteReport(id) {
   if (!confirm('Delete this saved report?')) return;
   try {
-    const res = await fetch(`${API_BASE}/reports/${id}`, { method: 'DELETE' });
-    const data = await res.json();
-    if (data.deleted) {
+    const reports = readLocalReports();
+    const nextReports = reports.filter((item) => Number(item.id) !== Number(id));
+
+    if (nextReports.length !== reports.length) {
+      writeLocalReports(nextReports);
       showToast('🗑 Report deleted');
       loadReportsList();
     } else {
@@ -2672,7 +2705,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveBtn = document.createElement('button');
     saveBtn.className = 'export-option';
     saveBtn.onclick = saveCurrentReport;
-    saveBtn.innerHTML = `Save to Reports Library <span>SQLite</span>`;
+    saveBtn.innerHTML = `Save to Reports Library <span>Browser</span>`;
     dropdown.insertBefore(saveBtn, dropdown.firstChild);
   }
 
