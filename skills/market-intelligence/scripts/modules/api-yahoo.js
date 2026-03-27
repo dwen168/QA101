@@ -10,9 +10,7 @@ const { scoreSentimentsWithRules, scoreCompanyNewsWithLlm } = require('./sentime
 let _yf = null;
 function getYahooFinance() {
   if (!_yf) {
-    const path = require('path');
-    const yf2Path = path.resolve(__dirname, '../../../../backend/node_modules/yahoo-finance2');
-    const YF = require(yf2Path).default;
+    const YF = require('yahoo-finance2').default;
     _yf = new YF({ suppressNotices: ['yahooSurvey', 'ripHistorical'] });
   }
   return _yf;
