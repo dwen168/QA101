@@ -12,11 +12,15 @@ const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value || ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+const isVercel = Boolean(process.env.VERCEL);
+const requestedLlmTimeoutMs = parsePositiveInt(process.env.LLM_TIMEOUT_MS, 15000);
+const llmTimeoutMs = isVercel ? Math.min(requestedLlmTimeoutMs, 9000) : requestedLlmTimeoutMs;
 
 module.exports = {
   port: Number(process.env.PORT || 3001),
+  isVercel,
   realDataTimeoutMs: parsePositiveInt(process.env.REAL_DATA_TIMEOUT_MS, 10000),
-  llmTimeoutMs: parsePositiveInt(process.env.LLM_TIMEOUT_MS, 60000),
+  llmTimeoutMs,
   llmProvider,
   deepseekApiKey: process.env.DEEPSEEK_API_KEY,
   deepseekBaseUrl: normalizeBaseUrl(process.env.DEEPSEEK_BASE_URL, 'https://api.deepseek.com/v1'),

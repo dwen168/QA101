@@ -24,7 +24,10 @@ function runWithLlmContext(overrides, callback) {
 
 function getResolvedLlmConfig() {
   const context = llmRequestContext.getStore();
-  const provider = context?.provider || normalizeProvider(config.llmProvider);
+  const requestedProvider = context?.provider || normalizeProvider(config.llmProvider);
+  const provider = (config.isVercel && requestedProvider === 'ollama')
+    ? (config.geminiApiKey ? 'gemini' : 'deepseek')
+    : requestedProvider;
   const model = context?.model
     || (provider === 'ollama'
       ? config.ollamaModel
@@ -193,6 +196,10 @@ async function callGeminiApi(messages, temperature, maxTokens, model) {
 async function callLlm({ systemPrompt, userMessage, messages, temperature = 0.3, maxTokens = 2000 }) {
   const { provider, model } = getResolvedLlmConfig();
   const resolvedMessages = getMessages(systemPrompt, userMessage, messages);
+
+  if (config.isVercel && provider === 'ollama') {
+    throw new Error('Ollama is not available on Vercel. Switch provider to gemini or deepseek.');
+  }
 
   try {
     if (provider === 'ollama') {

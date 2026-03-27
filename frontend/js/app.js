@@ -397,7 +397,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     if (isAbortError(err)) return;
     setPillState(1, '');
     removeLoadingMsg();
-    addMessage('bot', `Could not reach the backend. Make sure the server is running on port 3001.`);
+    addMessage('bot', 'Could not reach the backend. Please check deployment status and API routes.');
     return;
   }
 
@@ -484,7 +484,7 @@ async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
   } catch (err) {
     if (isAbortError(err)) return;
     removeLoadingMsg();
-    addMessage('bot', 'Could not run portfolio optimization. Make sure backend is running on port 3001.');
+    addMessage('bot', 'Could not run portfolio optimization. Please check deployment logs and API routes.');
   }
 }
 

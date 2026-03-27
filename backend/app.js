@@ -27,6 +27,11 @@ function createApp() {
       return;
     }
 
+    if (config.isVercel && providerHeader === 'ollama') {
+      res.status(400).json({ error: 'ollama is not available on Vercel. Use gemini or deepseek.' });
+      return;
+    }
+
     runWithLlmContext(
       { provider: providerHeader || null, model: modelHeader || null },
       () => next()
@@ -140,6 +145,11 @@ function createApp() {
 
     if (provider === 'gemini') {
       res.json({ provider, models: [config.geminiModel, 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'] });
+      return;
+    }
+
+    if (config.isVercel) {
+      res.status(400).json({ error: 'ollama models are not available on Vercel. Use gemini or deepseek.' });
       return;
     }
 
