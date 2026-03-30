@@ -22,7 +22,38 @@ function toggleTheme() {
   }
 })();
 
+function detectDevice() {
+  const isMobile = window.innerWidth <= 900 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  if (isMobile) {
+    document.body.classList.add('is-mobile');
+    document.body.classList.remove('is-desktop');
+    if (!document.body.classList.contains('show-chat') && !document.body.classList.contains('show-analysis')) {
+      document.body.classList.add('show-chat');
+    }
+  } else {
+    document.body.classList.add('is-desktop');
+    document.body.classList.remove('is-mobile');
+    document.body.classList.remove('show-chat', 'show-analysis');
+  }
+}
+
+function setMobileTab(tab) {
+  if (tab === 'chat') {
+    document.body.classList.add('show-chat');
+    document.body.classList.remove('show-analysis');
+  } else {
+    document.body.classList.add('show-analysis');
+    document.body.classList.remove('show-chat');
+  }
+  document.querySelectorAll('.mobile-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+  detectDevice();
+  window.addEventListener('resize', detectDevice);
+
   const saved = localStorage.getItem('quantbot.theme');
   if (saved === 'light') {
     const lightIcon = document.getElementById('theme-icon-light');
@@ -40,7 +71,7 @@ const DEFAULT_MODELS = {
 };
 const MODEL_PRESETS = {
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  gemini: ['gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'],
+  gemini: ['gemini-2.5-flash-lite', 'gemma-3'],
   ollama: [],
 };
 const STORAGE_KEYS = {
@@ -353,16 +384,19 @@ async function processMessage(text) {
     if (data.action === 'ANALYZE_STOCK' && data.ticker) {
       addMessage('bot', data.message || `Running analysis on <strong>${data.ticker}</strong>...`);
       chatHistory.push({ role: 'assistant', content: data.message });
+      if (document.body.classList.contains('is-mobile')) setMobileTab('analysis');
       await runSkillPipeline(data.ticker, data.timeHorizon || 'MEDIUM');
     } else if (data.action === 'RUN_BACKTEST' && data.ticker) {
       addMessage('bot', data.message || `Running backtest on <strong>${data.ticker}</strong>...`);
       chatHistory.push({ role: 'assistant', content: data.message || 'Running backtest...' });
+      if (document.body.classList.contains('is-mobile')) setMobileTab('analysis');
       await runBacktestPipeline(data.ticker, data.startDate, data.endDate, data.strategyName || 'trade-recommendation', data.timeHorizon || 'MEDIUM');
     } else if (data.action === 'OPTIMIZE_PORTFOLIO') {
       const tickers = Array.isArray(data.tickers) ? data.tickers : [];
       if (tickers.length >= 2) {
         addMessage('bot', data.message || `Running portfolio optimization on <strong>${tickers.join(', ')}</strong>...`);
         chatHistory.push({ role: 'assistant', content: data.message || 'Running portfolio optimization...' });
+        if (document.body.classList.contains('is-mobile')) setMobileTab('analysis');
         await runPortfolioPipeline(tickers, data.timeHorizon || 'MEDIUM');
       } else {
         addMessage('bot', data.message || 'Please provide at least 2 tickers, e.g. "Optimize portfolio AAPL, MSFT, NVDA".');
