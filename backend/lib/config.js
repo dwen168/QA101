@@ -3,10 +3,7 @@ const dotenv = require('dotenv');
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
-const llmProvider = String(
-  process.env.LLM_PROVIDER
-    || (process.env.GEMINI_API_KEY ? 'gemini' : (process.env.OLLAMA_MODEL ? 'ollama' : 'deepseek'))
-).toLowerCase();
+const llmProvider = String(process.env.LLM_PROVIDER || 'deepseek').toLowerCase();
 const normalizeBaseUrl = (value, fallback) => String(value || fallback).replace(/\/+$/, '');
 const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value || ''), 10);
@@ -27,7 +24,7 @@ module.exports = {
   deepseekModel: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
   geminiApiKey: process.env.GEMINI_API_KEY,
   geminiBaseUrl: normalizeBaseUrl(process.env.GEMINI_BASE_URL, 'https://generativelanguage.googleapis.com/v1beta'),
-  geminiModel: process.env.GEMINI_MODEL || 'gemma-3',
+  geminiModel: process.env.GEMINI_MODEL || 'gemma-3-12b-it',
   ollamaBaseUrl: normalizeBaseUrl(process.env.OLLAMA_BASE_URL, 'http://127.0.0.1:11434'),
   ollamaModel: process.env.OLLAMA_MODEL || 'qwen3.5:9b',
   alphaVantageApiKey: process.env.ALPHA_VANTAGE_API_KEY || 'demo',

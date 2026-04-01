@@ -63,15 +63,24 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const API_BASE = '/api';
 const DEFAULT_MODELS = {
   deepseek: 'deepseek-chat',
-  gemini: 'gemini-2.5-flash-lite',
+  gemini: 'gemma-3-12b-it',
   ollama: 'qwen3.5:9b',
 };
 const MODEL_PRESETS = {
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  gemini: ['gemini-2.5-flash-lite', 'gemma-3'],
+  gemini: ['gemma-3-12b-it', 'gemma-3-27b-it'],
   ollama: [],
 };
 const STORAGE_KEYS = {
@@ -1678,12 +1687,7 @@ function renderEDA(charts, edaInsights, marketData, panel) {
     ? sentimentNews.reduce((sum, item) => sum + Number(item.sentiment || 0), 0) / sentimentNews.length
     : 0;
   const overallSentimentLabel = overallSentiment > 0.1 ? 'BULLISH' : overallSentiment < -0.1 ? 'BEARISH' : 'NEUTRAL';
-  const escapeHtml = (value) => String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+  // escapeHtml is defined globally
   const sentimentCellBackground = (value) => {
     const score = Number.isFinite(Number(value)) ? Number(value) : 0;
     const intensity = Math.min(0.9, 0.25 + Math.abs(score) * 0.55);
@@ -2459,10 +2463,39 @@ async function readJsonResponse(res) {
   }
 }
 
-function buildExportDocument() {
-  const styles = Array.from(document.querySelectorAll('style')).map((node) => node.textContent).join('\n');
+function collectExportStyles() {
+  const styleChunks = [];
+
+  for (const sheet of Array.from(document.styleSheets || [])) {
+    try {
+      const rules = Array.from(sheet.cssRules || []);
+      if (rules.length) {
+        styleChunks.push(rules.map((rule) => rule.cssText).join('\n'));
+      }
+    } catch {
+      // Ignore stylesheets that cannot be read due to browser restrictions.
+    }
+  }
+
+  return styleChunks.join('\n');
+}
+
+function buildBodyExportAttributes() {
+  const attrs = [];
+  const theme = document.body.getAttribute('data-theme');
+  const bodyClass = (document.body.className || '').trim();
+
+  if (theme) attrs.push(`data-theme="${escapeHtml(theme)}"`);
+  if (bodyClass) attrs.push(`class="${escapeHtml(bodyClass)}"`);
+
+  return attrs.length ? ` ${attrs.join(' ')}` : '';
+}
+
+async function buildExportDocument() {
+  const styles = collectExportStyles();
   const exportedPanel = clonePanelForExport();
   const title = buildExportFilename('html').replace(/\.html$/, '');
+  const bodyAttrs = buildBodyExportAttributes();
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -2489,7 +2522,7 @@ canvas, img { max-width: 100%; width: 100%; height: auto; }
 }
 </style>
 </head>
-<body>
+<body${bodyAttrs}>
   <div class="export-shell">
     ${exportedPanel.outerHTML}
   </div>
@@ -2497,7 +2530,7 @@ canvas, img { max-width: 100%; width: 100%; height: auto; }
 </html>`;
 }
 
-function exportCurrentView(format) {
+async function exportCurrentView(format) {
   closeExportMenu();
 
   if (!hasExportableContent()) {
@@ -2505,7 +2538,7 @@ function exportCurrentView(format) {
     return;
   }
 
-  const exportHtml = buildExportDocument();
+  const exportHtml = await buildExportDocument();
 
   if (format === 'html') {
     const blob = new Blob([exportHtml], { type: 'text/html;charset=utf-8' });

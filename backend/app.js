@@ -144,7 +144,7 @@ function createApp() {
     }
 
     if (provider === 'gemini') {
-      res.json({ provider, models: [config.geminiModel, 'gemini-2.5-flash-lite', 'gemma-3'] });
+      res.json({ provider, models: [config.geminiModel, 'gemini-2.5-flash-lite', 'gemma-3-12b-it', 'gemma-3-27b-it'] });
       return;
     }
 

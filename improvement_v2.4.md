@@ -178,4 +178,40 @@ Payload size is capped at 9 MB server-side; the UI also validates before sending
 - **Fix**:
   - Resolved `Cannot access 'sectorLabel' before initialization` by correcting variable declaration order in the Yahoo data path.
 
+---
+
+## Post-v2.4 LLM Provider Fixes
+
+### 1. Gemma 3 `systemInstruction` Incompatibility
+- **Root Cause**: The Gemini API call path sent a `systemInstruction` field for all models. Gemma 3 models (`gemma-3-*`) do not support this field and return `"Developer instruction is not enabled for models/gemma-3-*"`.
+- **Module Affected**: `backend/lib/llm.js`
+- **Fix**:
+  - Added `isGemmaModel(model)` helper that detects `gemma-3-` prefix.
+  - For Gemma models the system prompt is inlined as the first `user` turn content (`System instruction:\n…`) instead of using `systemInstruction`.
+  - Non-Gemma Gemini models continue to use `systemInstruction` unchanged.
+
+### 2. `models/` Prefix Causes Invalid Model Name Format
+- **Root Cause**: If `GEMINI_MODEL` was set to `models/gemma-3-12b-it` (with the `models/` prefix), the Gemini endpoint URL became `.../models/models/gemma-3-12b-it:generateContent`, triggering `"unexpected model name format"`.
+- **Module Affected**: `backend/lib/config.js`, `frontend/js/app.js`
+- **Fix**: Default model values and frontend presets are stored without the `models/` prefix (e.g. `gemma-3-12b-it`). The `models/` segment is already present in the URL template in `llm.js`.
+
+### 3. Backend Model List Contained Invalid Alias `gemma-3`
+- **Root Cause**: `/api/llm/models?provider=gemini` returned `gemma-3` as a selectable model, which is not a valid `generateContent` model name.
+- **Module Affected**: `backend/app.js`
+- **Fix**: Replaced `gemma-3` in the Gemini model list with the correct full identifiers `gemma-3-12b-it` and `gemma-3-27b-it`.
+
+### 4. LLM Provider Auto-Selection Masked Bad Keys
+- **Root Cause**: `config.js` selected the active provider automatically based on which API keys were present in `.env` (`GEMINI_API_KEY` present → use Gemini, regardless of `LLM_PROVIDER`). This caused requests to silently fall through to a working provider even when the user intentionally set a bad key on a different provider to test error handling.
+- **Module Affected**: `backend/lib/config.js`
+- **Fix**: Provider selection is now strict — only `LLM_PROVIDER` is respected; if unset, the default is `deepseek`. No automatic key-presence detection.
+
+### 5. LLM Error Silently Swallowed by Chat Routing Fallback
+- **Root Cause**: `routeChatMessage()` in `backend/lib/chat.js` caught all `callLlm` errors and continued into a local heuristic fallback (ticker extraction, keyword matching), so an invalid API key would still return a seemingly successful routing result.
+- **Module Affected**: `backend/lib/chat.js`
+- **Fix**: If the caught error message is `"This LLM is temporarily unavailable. Please try another LLM."`, the error is re-thrown immediately and the fallback is skipped. Other errors (e.g. JSON parse failures) still fall through to the local heuristic to preserve offline/demo usability.
+
+### 6. Unified User-Facing LLM Error Message
+- **Module Affected**: `backend/lib/llm.js` → `formatProviderError()`
+- **Fix**: All provider errors (wrong key, connection refused, timeout, model format error, etc.) now surface a single English message: `"This LLM is temporarily unavailable. Please try another LLM."` instead of exposing raw API error details to the user.
+
 

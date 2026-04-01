@@ -133,7 +133,11 @@ If a field is unknown, set it to null. Keep message concise and professional.`;
     });
     const cleaned = String(content || '').replace(/```json|```/g, '').trim();
     return hydrateRoutingResult(JSON.parse(cleaned), message);
-  } catch {
+  } catch (error) {
+    if (String(error?.message || '').includes('This LLM is temporarily unavailable. Please try another LLM.')) {
+      throw error;
+    }
+
     // Fallback: extract ticker from message
     // Matches: US tickers (AAPL, TSLA, CBA), international (CBA.AX, 7203.T, HSBA.L), NASDAQ/NYSE codes
     const msg = String(message || '').toUpperCase().trim();

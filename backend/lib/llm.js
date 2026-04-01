@@ -60,20 +60,7 @@ function getMessages(systemPrompt, userMessage, messages) {
 }
 
 function formatProviderError(provider, error) {
-  const detail = error.response?.data?.error?.message
-    || error.response?.data?.message
-    || error.code
-    || error.message;
-
-  if (error.code === 'ECONNABORTED') {
-    return `${provider} request timed out after ${config.llmTimeoutMs}ms. You can retry or reduce prompt size.`;
-  }
-
-  if (provider === 'ollama' && error.code === 'ECONNREFUSED') {
-    return 'Ollama is not reachable. Start Ollama and ensure OLLAMA_BASE_URL points to the running instance.';
-  }
-
-  return `${provider} request failed: ${detail}`;
+  return 'This LLM is temporarily unavailable. Please try another LLM.';
 }
 
 async function callDeepSeekApi(messages, temperature, maxTokens, model) {
@@ -150,21 +137,35 @@ function toGeminiContents(messages) {
   return conversation.length ? conversation : [{ role: 'user', parts: [{ text: '' }] }];
 }
 
+function isGemmaModel(model) {
+  return /^gemma-/i.test(String(model || '').trim());
+}
+
 async function callGeminiApi(messages, temperature, maxTokens, model) {
   if (!config.geminiApiKey) {
     throw new Error('GEMINI_API_KEY is not configured');
   }
 
   const systemText = messages.find((entry) => entry.role === 'system')?.content;
+  const gemmaModel = isGemmaModel(model);
+  const contents = toGeminiContents(messages);
+
+  if (gemmaModel && systemText) {
+    contents.unshift({
+      role: 'user',
+      parts: [{ text: `System instruction:\n${String(systemText)}` }],
+    });
+  }
+
   const body = {
-    contents: toGeminiContents(messages),
+    contents,
     generationConfig: {
       temperature,
       maxOutputTokens: maxTokens,
     },
   };
 
-  if (systemText) {
+  if (systemText && !gemmaModel) {
     body.systemInstruction = {
       parts: [{ text: String(systemText) }],
     };
@@ -198,7 +199,7 @@ async function callLlm({ systemPrompt, userMessage, messages, temperature = 0.3,
   const resolvedMessages = getMessages(systemPrompt, userMessage, messages);
 
   if (config.isVercel && provider === 'ollama') {
-    throw new Error('Ollama is not available on Vercel. Switch provider to gemini or deepseek.');
+    throw new Error('This LLM is temporarily unavailable. Please try another LLM.');
   }
 
   try {
