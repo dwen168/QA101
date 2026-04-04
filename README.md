@@ -201,9 +201,10 @@ The executable skill logic lives directly in each skill folder under `scripts/`.
 - Adds event-regime overlays from a knowledge base (war/geopolitics, oil shocks, rate cycles, supply-chain disruption) mapped to sector beneficiaries/headwinds
 - Adds central-bank policy overlays (FED/RBA) into score construction with explicit policy tailwind/headwind signals when policy impact is material
 - Maps aggregate score to BUY/HOLD/SELL with confidence %
-- Computes exit levels using **14-day ATR** (more accurate than 52-week range):
-  - Stop-loss = entry − (ATR14 × 1.5)
-  - Take-profit = entry + (ATR14 × 2.5)
+- Computes exit levels using **14-day ATR** with profile-dependent multipliers:
+  - SHORT: stop-loss = entry − (ATR14 × 1.2), take-profit = entry + (ATR14 × 2.0)
+  - MEDIUM: stop-loss = entry − (ATR14 × 1.5), take-profit = entry + (ATR14 × 2.5)
+  - LONG: stop-loss = entry − (ATR14 × 2.0), take-profit = entry + (ATR14 × 4.0)
 - Calculates **Value at Risk (VaR)** for 1-day maximum loss at 95% confidence
 - LLM generates rationale and risk factors
 - Returns structured `TradeRecommendation` with multi-indicator validation + risk metrics

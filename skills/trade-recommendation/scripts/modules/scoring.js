@@ -1,6 +1,7 @@
 const { getSignalWeight } = require('../../../../backend/lib/weights-loader');
 const { getRecommendationProfile, adjustSignalPoints } = require('./profiles');
 const { buildEventRegimeOverlay, buildPolicyOverlay } = require('./overlays');
+const { calculateAllIndicators } = require('../../../../backend/lib/technical-indicators');
 
 function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   const signals = [];
@@ -394,12 +395,12 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
       add('Earnings Beat', 1, 'Latest earnings report beat analyst estimates, providing fundamental momentum.', [
         { label: 'Beat By', value: latestSurprise.surprisePercent ? `+${latestSurprise.surprisePercent.toFixed(1)}%` : `+$${latestSurprise.surprise}` },
         { label: 'Period', value: latestSurprise.period },
-      ], 'momentum');
+      ], 'fundamental');
     } else if (latestSurprise.surprisePercent < -5 || latestSurprise.surprise < 0) {
       add('Earnings Miss', -1, 'Latest earnings missed estimates, showing broken fundamental momentum.', [
         { label: 'Missed By', value: latestSurprise.surprisePercent ? `${latestSurprise.surprisePercent.toFixed(1)}%` : `-$${Math.abs(latestSurprise.surprise)}` },
         { label: 'Period', value: latestSurprise.period },
-      ], 'momentum');
+      ], 'fundamental');
     }
   }
 
@@ -535,6 +536,85 @@ function scoreSignals(marketData, edaInsights = {}, timeHorizon = 'MEDIUM') {
   return { signals, score: parseFloat(score.toFixed(1)), buyRatio, profile, eventRegimeOverlay, policyOverlay };
 }
 
+// ─── Backtest integration: shared scoring core ────────────────────────────
+
+function _rsiFromCloses(closes, period) {
+  if (closes.length < period + 1) return 50;
+  const recent = closes.slice(-(period + 1));
+  let gains = 0, losses = 0;
+  for (let i = 1; i < recent.length; i++) {
+    const diff = recent[i] - recent[i - 1];
+    if (diff > 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+  gains /= period;
+  losses /= period;
+  return 100 - 100 / (1 + gains / (losses + 1e-9));
+}
+
+/**
+ * Score a single OHLCV bar using the trade-recommendation signal engine.
+ * Only price-derivable signals contribute; sentiment, macro, analyst and
+ * fundamental context are absent and safely defaulted so scoreSignals
+ * skips their contributions without throwing.
+ *
+ * @param {Array}  priceHistory  Full OHLCV array
+ * @param {number} currentIndex  Index of the bar being evaluated
+ * @param {string} timeHorizon   'SHORT' | 'MEDIUM' | 'LONG'
+ * @returns {number} Raw composite score (same scale as scoreSignals)
+ */
+function scoreBacktestSnapshot(priceHistory, currentIndex, timeHorizon) {
+  const current = priceHistory[currentIndex];
+  const history = priceHistory.slice(0, currentIndex + 1);
+  const closes = history.map(p => p.close);
+
+  const ma50 = closes.length >= 50
+    ? closes.slice(-50).reduce((a, b) => a + b, 0) / 50
+    : null;
+  const ma200 = closes.length >= 200
+    ? closes.slice(-200).reduce((a, b) => a + b, 0) / 200
+    : null;
+
+  const prev = currentIndex > 0 ? priceHistory[currentIndex - 1] : null;
+  const changePercent = prev && prev.close > 0
+    ? ((current.close - prev.close) / prev.close) * 100
+    : 0;
+
+  const technicalIndicators = history.length >= 20
+    ? calculateAllIndicators(history)
+    : { available: false };
+
+  const marketData = {
+    price: current.close,
+    ma50,
+    ma200,
+    rsi: _rsiFromCloses(closes, 14),
+    change: prev ? current.close - prev.close : 0,
+    changePercent,
+    volume: current.volume || 0,
+    technicalIndicators,
+    sentimentScore: 0,
+    sentimentLabel: 'NEUTRAL',
+    macroContext: null,
+    macroAnchors: null,
+    sector: 'Unknown',
+    shortMetrics: null,
+    analystConsensus: {
+      strongBuy: 0, buy: 0, hold: 0, sell: 0, strongSell: 0,
+      upside: 0, targetMean: 0, targetLow: 0, targetHigh: 0,
+    },
+    pe: 0,
+    eps: 0,
+    advancedFundamentals: null,
+    earningsSurprise: null,
+    insiderTransactions: null,
+  };
+
+  const { score } = scoreSignals(marketData, {}, timeHorizon);
+  return score;
+}
+
 module.exports = {
-  scoreSignals
+  scoreSignals,
+  scoreBacktestSnapshot,
 };

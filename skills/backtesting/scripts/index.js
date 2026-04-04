@@ -17,6 +17,7 @@ const {
   calculateMACD,
   calculateBollingerBands,
 } = require('../../../backend/lib/technical-indicators');
+const { scoreBacktestSnapshot } = require('../../trade-recommendation/scripts/modules/scoring');
 const path = require('path');
 const config = require('../../../backend/lib/config');
 const REAL_DATA_TIMEOUT_MS = config.realDataTimeoutMs;
@@ -38,7 +39,9 @@ function getBacktestProfile(timeHorizon = 'MEDIUM') {
       timeHorizon: 'SHORT',
       label: 'Short-term tactical',
       holdingPeriod: 'Up to 8 weeks',
-      stopLossPct: 0.02,
+      atrStopMult: 1.2,        // aligned with trade-recommendation profile
+      atrTakeProfitMult: 2.0,
+      stopLossPct: 0.02,       // fallback if ATR unavailable
       takeProfitPct: 0.05,
       maxHoldingDays: 40,
     },
@@ -46,6 +49,8 @@ function getBacktestProfile(timeHorizon = 'MEDIUM') {
       timeHorizon: 'MEDIUM',
       label: 'Medium-term balanced',
       holdingPeriod: '2 to 6 months',
+      atrStopMult: 1.5,
+      atrTakeProfitMult: 2.5,
       stopLossPct: 0.03,
       takeProfitPct: 0.07,
       maxHoldingDays: 120,
@@ -54,6 +59,8 @@ function getBacktestProfile(timeHorizon = 'MEDIUM') {
       timeHorizon: 'LONG',
       label: 'Long-term trend/fundamental',
       holdingPeriod: '6+ months',
+      atrStopMult: 2.0,
+      atrTakeProfitMult: 4.0,
       stopLossPct: 0.08,
       takeProfitPct: 0.2,
       maxHoldingDays: 252,
@@ -223,8 +230,8 @@ function getMinimumTradingDays(signalType, timeHorizon = 'MEDIUM') {
   return Math.max(base, 20);
 }
 
-// Generate trading signals (simplified trade-recommendation scoring)
-function generateSignal(priceData, index, signalType = 'trade-recommendation') {
+// Generate trading signals — trade-recommendation uses the shared scoring core.
+function generateSignal(priceData, index, signalType = 'trade-recommendation', timeHorizon = 'MEDIUM') {
   const warmupBars = getRequiredWarmupBars(signalType);
   if (index < warmupBars) return 'HOLD';
   
@@ -251,48 +258,14 @@ function generateSignal(priceData, index, signalType = 'trade-recommendation') {
     return 'HOLD';
   }
 
-  let score = 0;
-  
-  // MA50 signal
-  const ma50 = closes.slice(-50).reduce((a, b) => a + b) / 50;
-  if (current.close > ma50) score += 2;
-  else score -= 2;
-  
-  // MA200 signal
-  if (history.length >= 200) {
-    const ma200 = closes.slice(-200).reduce((a, b) => a + b) / 200;
-    if (current.close > ma200) score += 1;
-    else score -= 1;
-  }
-  
-  // RSI signal
-  const rsi = calculateRSI(closes, 14);
-  if (rsi > 70) score -= 2;
-  else if (rsi < 30) score += 1;
-  else if (rsi >= 45 && rsi <= 65) score += 1;
-  
-  // MACD signal using standard MACD(12,26,9)
-  const macd = calculateMACD(closes);
-  if (macd) {
-    if (macd.signal === 'BULLISH') score += 1;
-    else if (macd.signal === 'BEARISH') score -= 1;
-  }
-  
-  // Bollinger Bands signal
-  const bb = calculateBollingerBands(closes, 20);
-  if (bb) {
-    const bbPosition = (current.close - bb.lowerBand) / ((bb.upperBand - bb.lowerBand) || 1e-9);
-    if (bbPosition < 0.2) score += 1;
-    else if (bbPosition > 0.8) score -= 1;
-  }
-  
-  // Map score to action
+  // Shared trade-recommendation scoring core — same signal engine as the
+  // recommendation module, using only price-derivable indicators.
+  const score = scoreBacktestSnapshot(priceData, index, timeHorizon);
   if (score >= 6) return 'STRONG_BUY';
   if (score >= 3) return 'BUY';
   if (score >= -2 && score <= 2) return 'HOLD';
   if (score <= -6) return 'STRONG_SELL';
   if (score <= -3) return 'SELL';
-  
   return 'HOLD';
 }
 
@@ -315,6 +288,27 @@ function calculateRSI(closes, period = 14) {
   return 100 - (100 / (1 + rs));
 }
 
+// Average True Range over `period` bars ending at endIndex.
+// Returns null if insufficient data.
+function calculateATR(priceData, endIndex, period = 14) {
+  if (endIndex < period) return null;
+  const bars = priceData.slice(Math.max(0, endIndex - period * 3), endIndex + 1);
+  if (bars.length < period + 1) return null;
+
+  const trValues = [];
+  for (let i = 1; i < bars.length; i++) {
+    const high = safeNumber(bars[i].high, bars[i].close);
+    const low  = safeNumber(bars[i].low,  bars[i].close);
+    const prevClose = safeNumber(bars[i - 1].close);
+    const tr = Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
+    trValues.push(tr);
+  }
+
+  const recent = trValues.slice(-period);
+  if (recent.length < period) return null;
+  return recent.reduce((a, b) => a + b, 0) / period;
+}
+
 // Simulate trading
 function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 0, profile = getBacktestProfile('MEDIUM')) {
   const trades = [];
@@ -333,20 +327,18 @@ function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 
 
     // Check exit conditions
     if (position) {
-      const entryPrice = position.entryPrice;
       const currentPrice = current.close;
-      const pnlPercent = (currentPrice - entryPrice) / entryPrice;
       const holdingDays = Math.max(1, Math.floor((current.date - position.entryDate) / (1000 * 60 * 60 * 24)));
 
-      // Stop-loss threshold depends on time horizon profile.
-      if (pnlPercent < -safeNumber(profile.stopLossPct, 0.03)) {
+      // ATR-dynamic stop-loss (falls back to pct if ATR was unavailable at entry).
+      if (currentPrice <= position.stopLossPrice) {
         const closedTrade = closeTrade(position, current, 'STOP_LOSS');
         action = 'SELL';
         actionMeta = { tradeId: closedTrade.tradeId, pnl: closedTrade.pnlDollars, reason: closedTrade.reason };
         exitedThisBar = true;
       }
-      // Take-profit threshold depends on time horizon profile.
-      else if (pnlPercent > safeNumber(profile.takeProfitPct, 0.07)) {
+      // ATR-dynamic take-profit.
+      else if (currentPrice >= position.takeProfitPrice) {
         const closedTrade = closeTrade(position, current, 'TAKE_PROFIT');
         action = 'SELL';
         actionMeta = { tradeId: closedTrade.tradeId, pnl: closedTrade.pnlDollars, reason: closedTrade.reason };
@@ -370,12 +362,23 @@ function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 
 
     // Check entry conditions
     if (!position && !exitedThisBar && ['BUY', 'STRONG_BUY'].includes(signal)) {
+      const atr14 = calculateATR(priceData, i, 14);
+      const entryPrice = current.close;
+      const stopLossPrice = atr14 != null
+        ? parseFloat((entryPrice - profile.atrStopMult * atr14).toFixed(4))
+        : parseFloat((entryPrice * (1 - safeNumber(profile.stopLossPct, 0.03))).toFixed(4));
+      const takeProfitPrice = atr14 != null
+        ? parseFloat((entryPrice + profile.atrTakeProfitMult * atr14).toFixed(4))
+        : parseFloat((entryPrice * (1 + safeNumber(profile.takeProfitPct, 0.07))).toFixed(4));
       position = {
         tradeId: nextTradeId++,
         entryIndex: i,
-        entryPrice: current.close,
+        entryPrice,
         entryDate: current.date,
         entrySignal: signal,
+        atrAtEntry: atr14 != null ? parseFloat(atr14.toFixed(4)) : null,
+        stopLossPrice,
+        takeProfitPrice,
       };
       action = 'BUY';
       actionMeta = { tradeId: position.tradeId, reason: signal };
@@ -424,10 +427,14 @@ function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 
       daysHeld: Math.max(1, Math.floor((exitCandle.date - pos.entryDate) / (1000 * 60 * 60 * 24))),
       entrySignal: pos.entrySignal,
       reason,
+      atrAtEntry: pos.atrAtEntry ?? null,
+      stopLossPrice: pos.stopLossPrice ?? null,
+      takeProfitPrice: pos.takeProfitPrice ?? null,
     };
 
     trades.push(trade);
     capital *= (1 + pnlPercent);
+    trade.balanceAfter = parseFloat(capital.toFixed(2));
     position = null;
     return trade;
   }
@@ -641,7 +648,7 @@ async function runBacktest(params, dependencies = {}) {
   }
   
   // Generate signals
-  const signals = simulationData.map((p, i) => generateSignal(simulationData, i, strategyName));
+  const signals = simulationData.map((p, i) => generateSignal(simulationData, i, strategyName, profile.timeHorizon));
   
   // Simulate trades
   const { trades, capital: finalCapital, equityCurve } = simulateTrades(simulationData, signals, initialCapital, tradingStartOffset, profile);
@@ -734,6 +741,20 @@ async function runBacktest(params, dependencies = {}) {
       },
       recommendations,
       warnings,
+      priceHistory: filteredData.map(p => ({
+        date: p.date instanceof Date ? p.date.toISOString().split('T')[0] : String(p.date).slice(0, 10),
+        open: parseFloat((p.open || p.close).toFixed(2)),
+        high: parseFloat((p.high || p.close).toFixed(2)),
+        low: parseFloat((p.low || p.close).toFixed(2)),
+        close: parseFloat(p.close.toFixed(2)),
+      })),
+      signalEngine: {
+        mode: strategyName === 'trade-recommendation' ? 'shared-trade-recommendation-core' : strategyName,
+        coverage: strategyName === 'trade-recommendation' ? 'price-and-technical-only' : 'full',
+        missingContext: strategyName === 'trade-recommendation'
+          ? ['sentiment', 'analyst-consensus', 'macro-regime', 'event-regime', 'insider', 'earnings-surprise']
+          : [],
+      },
       dataSource: historical.source,
     },
     dataSource: historical.source,

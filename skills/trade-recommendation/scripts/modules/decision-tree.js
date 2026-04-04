@@ -23,19 +23,31 @@ function selectTopByAbsPoints(signals, limit = 5) {
     .slice(0, limit);
 }
 
+function scoreToOutcome(netScore) {
+  if (netScore > 0.5) return 'bullish';
+  if (netScore < -0.5) return 'bearish';
+  return 'neutral';
+}
+
 // Each pillar is assigned an exclusive set of scoring buckets.
 const PILLAR_DEFS = [
   {
     id: 'technical-trend',
     label: 'Technical Trend',
-    description: 'Price action, moving averages, momentum, and technical indicators (MACD, RSI, BB, KDJ, OBV)',
+    description: 'Price action, moving averages, daily momentum, and technical indicators (MACD, RSI, BB, KDJ, OBV, VWAP)',
     buckets: ['trend', 'longtrend', 'oscillator', 'momentum', 'technical', 'intraday'],
   },
   {
     id: 'fundamental-value',
     label: 'Fundamental Value',
-    description: 'Company earnings (EPS/P·E), analyst ratings, and price targets',
+    description: 'Valuation, profitability, analyst ratings, and price targets',
     buckets: ['valuation', 'analyst'],
+  },
+  {
+    id: 'fundamental-momentum',
+    label: 'Fundamental Momentum',
+    description: 'Recent earnings surprise and operating momentum signals',
+    buckets: ['fundamental'],
   },
   {
     id: 'news-sentiment',
@@ -62,25 +74,38 @@ function buildDecisionTree({
   const normalizedScore = Number(score || 0);
   const normalizedConfidence = Number(confidence || 0);
   const signalPool = normalizeSignals(signals);
+  const assignedBuckets = new Set(PILLAR_DEFS.flatMap((def) => def.buckets));
 
-  // ── Build the four named pillars ──────────────────────────────────────────
   const pillars = PILLAR_DEFS.map((def) => {
     const pillarSignals = signalPool.filter((s) => def.buckets.includes(s.bucket));
     const netScore = parseFloat(
       pillarSignals.reduce((sum, s) => sum + s.points, 0).toFixed(1)
     );
-    const outcome = netScore > 0.5 ? 'bullish' : netScore < -0.5 ? 'bearish' : 'neutral';
     return {
       id: def.id,
       label: def.label,
       description: def.description,
       netScore,
-      outcome,
+      outcome: scoreToOutcome(netScore),
       topSignals: selectTopByAbsPoints(pillarSignals, 5),
     };
   });
 
-  // ── Risk Penalty pillar (cross-cutting negative drag) ─────────────────────
+  const uncategorizedSignals = signalPool.filter((signal) => !assignedBuckets.has(signal.bucket));
+  if (uncategorizedSignals.length) {
+    const netScore = parseFloat(
+      uncategorizedSignals.reduce((sum, signal) => sum + signal.points, 0).toFixed(1)
+    );
+    pillars.push({
+      id: 'other-drivers',
+      label: 'Other Drivers',
+      description: 'Signals that are scored but not part of the main pillar taxonomy.',
+      netScore,
+      outcome: scoreToOutcome(netScore),
+      topSignals: selectTopByAbsPoints(uncategorizedSignals, 5),
+    });
+  }
+
   const totalPositive = signalPool
     .filter((s) => s.points > 0)
     .reduce((sum, s) => sum + s.points, 0);
@@ -93,24 +118,19 @@ function buildDecisionTree({
     : 0;
   const riskOutcome = riskPressurePct > 50 ? 'high' : riskPressurePct > 28 ? 'moderate' : 'low';
 
-  pillars.push({
-    id: 'risk-penalty',
-    label: 'Risk Penalty',
-    description: 'Aggregate of all bearish/headwind signals across every category, reducing trade conviction',
-    netScore: -parseFloat(totalNegative.toFixed(1)),
-    outcome: riskOutcome,           // 'low' | 'moderate' | 'high'
-    riskPressurePct,
-    inverse: true,
-    topSignals: selectTopByAbsPoints(signalPool.filter((s) => s.points < 0), 5),
-  });
-
   const bullishPillars = pillars
-    .filter((p) => !p.inverse && p.outcome === 'bullish')
+    .filter((p) => p.outcome === 'bullish')
     .map((p) => p.label);
 
   return {
     title: 'Factor Contribution',
     pillars,
+    risk: {
+      negativeScore: parseFloat(totalNegative.toFixed(1)),
+      riskPressurePct,
+      outcome: riskOutcome,
+      topSignals: selectTopByAbsPoints(signalPool.filter((s) => s.points < 0), 5),
+    },
     leaf: {
       action,
       score: normalizedScore,

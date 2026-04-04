@@ -22,175 +22,6 @@
     transform: translateY(-1px);
   }
 </style>
-<script>
-  const decisionStepData = {
-    step1: {
-      title: 'STEP 1 · Data Ingestion',
-      subtitle: 'Captured content types',
-      html: `
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(59,130,246,0.07)">
-            <div style="font-size:12px;color:var(--text)"><strong>Market Data</strong> · OHLCV candles, volume profile, MA/RSI/MACD source series</div>
-          </div>
-          <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(16,185,129,0.07)">
-            <div style="font-size:12px;color:var(--text)"><strong>Fundamental Data</strong> · PE ratio, EPS trend, valuation baseline context</div>
-          </div>
-          <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(245,158,11,0.07)">
-            <div style="font-size:12px;color:var(--text)"><strong>Sentiment Data</strong> · news headlines, tone scores, analyst rating revisions</div>
-          </div>
-          <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(139,92,246,0.07)">
-            <div style="font-size:12px;color:var(--text)"><strong>Macro Anchors</strong> · VIX, TNX, CL=F and cross-asset stress regime tags</div>
-          </div>
-        </div>
-      `,
-      footnote: 'Goal: collect heterogeneous inputs before feature engineering.'
-    },
-    step2: {
-      title: 'STEP 2 · Signal Build',
-      subtitle: 'Signal list used for scoring',
-      html: `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-          <div style="padding:9px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">trend_ma_alignment</div>
-          <div style="padding:9px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">rsi_reversal_zone</div>
-          <div style="padding:9px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">macd_momentum_shift</div>
-          <div style="padding:9px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">bollinger_breakout_pressure</div>
-          <div style="padding:9px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">valuation_discount_signal</div>
-          <div style="padding:9px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">eps_growth_quality</div>
-          <div style="padding:9px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">news_sentiment_score</div>
-          <div style="padding:9px;border:1px solid var(--border);border-radius:8px;font-size:12px;color:var(--text)">analyst_consensus_delta</div>
-        </div>
-      `,
-      footnote: 'Goal: normalize mixed indicators into comparable signals.'
-    },
-    step3: {
-      title: 'STEP 3 · Risk Overlay',
-      subtitle: 'Controls that prevent overconfident calls',
-      html: `
-        <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:8px;color:var(--text2);font-size:12px;line-height:1.5">
-          <li><strong style="color:var(--text)">Volatility Regime Penalty</strong> lowers score during elevated VIX environments.</li>
-          <li><strong style="color:var(--text)">Macro Conflict Check</strong> penalizes bullish calls under tightening-rate stress.</li>
-          <li><strong style="color:var(--text)">Tug-of-War Filter</strong> dampens output when bull/bear factors strongly conflict.</li>
-          <li><strong style="color:var(--text)">Confidence Calibration</strong> scales confidence to historical analog reliability.</li>
-          <li><strong style="color:var(--text)">Risk Budgeting</strong> avoids aggressive bias when downside tail-risk is high.</li>
-        </ul>
-      `,
-      footnote: 'Goal: convert raw alpha into risk-adjusted signal quality.'
-    },
-    step4: {
-      title: 'STEP 4 · Final Scoring',
-      subtitle: 'Weighted factor fusion (0–100)',
-      html: `
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px"><span>Technical Trend</span><span>78</span></div>
-            <div style="height:8px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden"><div class="factor-bar-fill" data-score="78" style="height:100%;width:0;background:var(--cyan);transition:width .35s ease"></div></div>
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px"><span>Fundamental Value</span><span>64</span></div>
-            <div style="height:8px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden"><div class="factor-bar-fill" data-score="64" style="height:100%;width:0;background:var(--green);transition:width .35s ease"></div></div>
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px"><span>News & Sentiment</span><span>71</span></div>
-            <div style="height:8px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden"><div class="factor-bar-fill" data-score="71" style="height:100%;width:0;background:var(--amber);transition:width .35s ease"></div></div>
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px"><span>Macro Context</span><span>58</span></div>
-            <div style="height:8px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden"><div class="factor-bar-fill" data-score="58" style="height:100%;width:0;background:#8b5cf6;transition:width .35s ease"></div></div>
-          </div>
-          <div>
-            <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:4px"><span>Risk Penalty (inverse)</span><span>42</span></div>
-            <div style="height:8px;border-radius:999px;background:rgba(255,255,255,0.08);overflow:hidden"><div class="factor-bar-fill" data-score="42" style="height:100%;width:0;background:var(--red);transition:width .35s ease"></div></div>
-          </div>
-        </div>
-      `,
-      footnote: 'Composite score = weighted signal sum − risk penalties.'
-    },
-    step5: {
-      title: 'STEP 5 · Recommendation',
-      subtitle: 'Final output delivered to user',
-      html: `
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:rgba(59,130,246,0.08)">
-            <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:6px">COMPOSITE OUTPUT</div>
-            <div style="display:flex;justify-content:space-between;align-items:end">
-              <div>
-                <div style="font-size:20px;color:var(--text);font-weight:600;line-height:1">72 / 100</div>
-                <div style="font-size:12px;color:var(--text2)">Confidence: Medium-High</div>
-              </div>
-              <div style="padding:5px 10px;border-radius:999px;background:rgba(16,185,129,0.14);color:var(--green);font-family:var(--mono);font-size:11px;border:1px solid rgba(16,185,129,0.25)">BUY BIAS</div>
-            </div>
-          </div>
-          <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:6px;color:var(--text2);font-size:12px;line-height:1.5">
-            <li>Decision: Buy / Hold / Sell mapped from threshold bands.</li>
-            <li>Confidence: calibrated by analog hit-rate and regime stability.</li>
-            <li>Rationale: top positive and negative drivers surfaced to user.</li>
-          </ul>
-        </div>
-      `,
-      footnote: 'Goal: actionable recommendation with transparent reasoning.'
-    }
-  };
-
-  function renderDecisionExplainBars() {
-    const rows = document.querySelectorAll('.factor-bar-fill[data-score]');
-    rows.forEach((el) => {
-      const score = Number(el.dataset.score || 0);
-      const normalized = Math.max(0, Math.min(100, score));
-      el.style.width = `${normalized}%`;
-    });
-  }
-
-  function selectDecisionStep(stepKey) {
-    const content = decisionStepData[stepKey];
-    if (!content) return;
-
-    const title = document.getElementById('decision-panel-title');
-    const subtitle = document.getElementById('decision-panel-subtitle');
-    const body = document.getElementById('decision-panel-body');
-    const footnote = document.getElementById('decision-panel-footnote');
-
-    if (title) title.textContent = content.title;
-    if (subtitle) subtitle.textContent = content.subtitle;
-    if (body) body.innerHTML = content.html;
-    if (footnote) footnote.textContent = content.footnote;
-
-    const cards = document.querySelectorAll('.decision-step-card[data-step]');
-    cards.forEach((card) => {
-      card.classList.toggle('active', card.dataset.step === stepKey);
-    });
-
-    renderDecisionExplainBars();
-  }
-
-  function showMindmap() {
-    const modal = document.getElementById('mindmap-modal');
-    modal.style.visibility = 'visible';
-    modal.style.opacity = '1';
-    modal.style.zIndex = '9999';
-    if (typeof closeInfoMenu === 'function') closeInfoMenu();
-    renderDecisionExplainBars();
-  }
-
-  function hideMindmap() {
-    const modal = document.getElementById('mindmap-modal');
-    modal.style.visibility = 'hidden';
-    modal.style.opacity = '0';
-    modal.style.zIndex = '-1';
-  }
-
-  window.addEventListener('DOMContentLoaded', () => {
-    selectDecisionStep('step1');
-    const modal = document.getElementById('mindmap-modal');
-    if (modal) {
-      modal.addEventListener('click', (event) => {
-        if (event.target === modal) hideMindmap();
-      });
-    }
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') hideMindmap();
-    });
-  });
-</script>
 </head>
 <body>
 
@@ -252,13 +83,17 @@
     </div>
     <div class="export-menu" style="margin-left:8px">
       <button class="export-btn" id="info-btn" onclick="toggleInfoMenu(event)">
-        <span>How it Works</span>
+        <span>Flow Overview</span>
         <span class="caret">▼</span>
       </button>
       <div class="export-dropdown" id="info-dropdown">
         <button class="export-option" onclick="showMindmap()">
-          <strong>Decision Logic</strong>
-          <span>Flow View</span>
+          <strong>Recommendation Flow</strong>
+          <span>High-Level View</span>
+        </button>
+        <button class="export-option" onclick="showAlgorithmSpec()">
+          <strong>Recommendation Algorithm</strong>
+          <span>Detailed Spec</span>
         </button>
       </div>
     </div>
@@ -329,13 +164,13 @@
   </button>
 </div>
 
-<!-- How it works Modal -->
+<!-- Recommendation flow modal -->
 <div id="mindmap-modal" class="modal-overlay" style="visibility:hidden;opacity:0;transition:opacity 0.2s;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:-1;align-items:center;justify-content:center;backdrop-filter:blur(4px);display:flex">
   <div class="modal-content" style="background:var(--bg);width:90%;max-width:1200px;height:90%;border-radius:12px;border:1px solid var(--border);display:flex;flex-direction:column;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5)">
     <div style="padding:20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-      <h2 style="margin:0;font-size:18px;color:var(--text);font-family:var(--sans)">How Recommendation Is Built</h2>
+      <h2 style="margin:0;font-size:18px;color:var(--text);font-family:var(--sans)">Recommendation Flow Overview</h2>
       <div style="display:flex;align-items:center;gap:8px">
-        <span style="font-family:var(--mono);font-size:11px;color:var(--text3)">Flow + Contribution View</span>
+        <span style="font-family:var(--mono);font-size:11px;color:var(--text3)">High-level only, not a formal spec</span>
         <button onclick="hideMindmap()" style="background:none;border:none;color:var(--text2);font-size:24px;cursor:pointer">&times;</button>
       </div>
     </div>
@@ -367,7 +202,7 @@
         <div style="border:1px solid var(--border);border-radius:12px;background:var(--bg);padding:14px;display:flex;flex-direction:column;gap:12px">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <h3 id="decision-panel-title" style="margin:0;font-size:14px;color:var(--text)">STEP 1 · Data Ingestion</h3>
-            <span id="decision-panel-subtitle" style="font-family:var(--mono);font-size:11px;color:var(--text3)">Captured content types</span>
+            <span id="decision-panel-subtitle" style="font-family:var(--mono);font-size:11px;color:var(--text3)">High-level input groups</span>
           </div>
 
           <div id="decision-panel-body" style="display:flex;flex-direction:column;gap:10px"></div>
@@ -379,6 +214,178 @@
   </div>
 </div>
 
+<!-- Detailed recommendation algorithm modal -->
+<div id="algorithm-modal" class="modal-overlay" style="visibility:hidden;opacity:0;transition:opacity 0.2s;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:-1;align-items:center;justify-content:center;backdrop-filter:blur(4px);display:flex">
+  <div class="modal-content" style="background:var(--bg);width:92%;max-width:1280px;height:90%;border-radius:12px;border:1px solid var(--border);display:flex;flex-direction:column;box-shadow:0 25px 50px -12px rgba(0,0,0,0.5)">
+    <div style="padding:20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <h2 style="margin:0;font-size:18px;color:var(--text);font-family:var(--sans)">Recommendation Algorithm Specification</h2>
+        <div style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--text3)">Implementation-oriented view of how the current recommendation engine is built</div>
+      </div>
+      <button onclick="hideAlgorithmSpec()" style="background:none;border:none;color:var(--text2);font-size:24px;cursor:pointer">&times;</button>
+    </div>
+    <div style="flex:1;overflow:auto;background:var(--bg2);padding:18px">
+      <div style="display:flex;flex-direction:column;gap:14px">
+        <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+            <div style="font-family:var(--mono);font-size:11px;color:var(--cyan)">A. SCORING EQUATION</div>
+            <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">Implemented in scoreSignals()</span>
+          </div>
+          <div style="margin-top:10px;padding:12px;border-radius:10px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:13px;color:var(--text2);line-height:1.8">
+            adjustedPoints_i = roundToHalf(rawWeight_i × multiplier_bucket,horizon)<br>
+            compositeScore = Σ adjustedPoints_i
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.65">
+            Each signal contributes signed points. Raw weights come from the calibrated weight file. The selected investment horizon then rescales whole signal buckets before the final sum is formed.
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1.2fr 0.8fr;gap:14px">
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--green)">B. BUCKETS AND FEATURE FAMILIES</div>
+              <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">Used for both scoring and attribution</span>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px;font-size:12px;color:var(--text2)">
+              <div style="padding:9px;border:1px solid var(--border);border-radius:8px">trend / longTrend<br><span style="color:var(--text3)">Price vs MA50 / MA200</span></div>
+              <div style="padding:9px;border:1px solid var(--border);border-radius:8px">oscillator<br><span style="color:var(--text3)">RSI overbought / oversold / healthy</span></div>
+              <div style="padding:9px;border:1px solid var(--border);border-radius:8px">technical / intraday<br><span style="color:var(--text3)">MACD, BB, KDJ, OBV, VWAP</span></div>
+              <div style="padding:9px;border:1px solid var(--border);border-radius:8px">momentum<br><span style="color:var(--text3)">Daily move strength</span></div>
+              <div style="padding:9px;border:1px solid var(--border);border-radius:8px">valuation / analyst<br><span style="color:var(--text3)">P/E, EPS, ratings, targets</span></div>
+              <div style="padding:9px;border:1px solid var(--border);border-radius:8px">fundamental<br><span style="color:var(--text3)">Earnings beat/miss momentum</span></div>
+              <div style="padding:9px;border:1px solid var(--border);border-radius:8px">sentiment / eda<br><span style="color:var(--text3)">News tone, short interest, EDA overlays</span></div>
+              <div style="padding:9px;border:1px solid var(--border);border-radius:8px">macro<br><span style="color:var(--text3)">Macro regime, policy, event overlays</span></div>
+            </div>
+          </div>
+
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--amber)">C. HORIZON MULTIPLIERS</div>
+              <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">Applied by bucket</span>
+            </div>
+            <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--text2)">
+              <div style="padding:10px;border:1px solid var(--border);border-radius:8px"><strong style="color:var(--text)">SHORT</strong><br><span style="color:var(--text3)">trend 1.0, longTrend 0.6, oscillator 1.2, sentiment 0.9, macro 0.8, analyst 0.6, valuation 0.4, fundamental 0.5, momentum 1.3, technical 1.2, intraday 1.2, eda 1.2</span></div>
+              <div style="padding:10px;border:1px solid var(--border);border-radius:8px"><strong style="color:var(--text)">MEDIUM</strong><br><span style="color:var(--text3)">all major buckets 1.0</span></div>
+              <div style="padding:10px;border:1px solid var(--border);border-radius:8px"><strong style="color:var(--text)">LONG</strong><br><span style="color:var(--text3)">trend 1.1, longTrend 1.35, oscillator 0.7, sentiment 0.75, macro 1.15, analyst 1.25, valuation 1.35, fundamental 1.2, momentum 0.5, technical 0.6, intraday 0.3, eda 0.8</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px">
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="font-family:var(--mono);font-size:11px;color:var(--amber);margin-bottom:8px">D. OVERLAYS</div>
+            <ul style="margin:0;padding-left:16px;display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--text2);line-height:1.55">
+              <li>Event-regime overlay adds sector-aware bias for war, oil, supply-chain, and rate-cycle regimes.</li>
+              <li>Policy overlay adds FED/RBA tailwind or headwind signals.</li>
+              <li>Macro anchors validate context with CL=F, ^TNX, and ^VIX.</li>
+              <li>EDA overlay adds breakout, volume, volatility, and trend-strength signals.</li>
+            </ul>
+          </div>
+
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="font-family:var(--mono);font-size:11px;color:var(--cyan);margin-bottom:8px">E. ACTION MAPPING</div>
+            <div style="font-size:12px;color:var(--text2);line-height:1.55">The composite score is mapped into a recommendation band after all adjusted signals are summed.</div>
+            <div style="margin-top:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.7">
+              score >= 6  -> STRONG BUY<br>
+              score >= 3  -> BUY<br>
+              score >= -2 -> HOLD<br>
+              score >= -5 -> SELL<br>
+              else        -> STRONG SELL
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.55">The UI then shows grouped attribution plus a separate bearish-pressure summary. Bearish pressure is intentionally not added as another pillar.</div>
+          </div>
+
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:8px">F. RISK OUTPUTS</div>
+            <div style="margin-top:2px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.7">
+              ATR14 → stopLoss, takeProfit<br>
+              VaR95 → 1-day downside reference<br>
+              confidence → score strength + signal agreement - conflict drag
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.55">Recommendation output contains actionable levels, risk/reward, confidence, and explanation. The ATR parameters are horizon-specific.</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--cyan)">F2. CONFIDENCE EQUATION</div>
+              <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">Implemented in computeConfidence()</span>
+            </div>
+            <div style="margin-top:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.75">
+              normalizedScore = min(1, abs(score) / 10)<br>
+              baseConfidence = 42 + round(34 * tanh(normalizedScore * 1.8))<br>
+              alignment = abs(posMag - negMag) / (posMag + negMag)<br>
+              consistencyAdjustment = round((alignment - 0.5) * 14)
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.6">
+              Confidence starts from score magnitude, then gets adjusted by how one-sided the evidence is. Strongly mixed positive and negative evidence reduces conviction even when the raw score is non-zero.
+            </div>
+          </div>
+
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--amber)">F3. CONFIDENCE ADJUSTMENTS</div>
+              <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">Final confidence is clipped to 30-92</span>
+            </div>
+            <div style="margin-top:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.75">
+              if alignment < 0.3 and totalMagnitude >= 5: -6 conflict penalty<br>
+              if signalCount <= 3: -4<br>
+              if signalCount >= 10: +2<br>
+              if macroRisk == HIGH: -8<br>
+              if macroRisk == LOW: +3<br>
+              finalConfidence = clamp(rawConfidence, 30, 92)
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.6">
+              This means confidence is not just a monotonic function of score. It also reacts to conflict, evidence depth, and macro regime quality.
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--green)">G. ATR EXIT SPEC</div>
+              <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">Used by recommendation output and aligned with backtesting</span>
+            </div>
+            <div style="margin-top:10px;padding:10px;border-radius:8px;background:rgba(255,255,255,0.03);font-family:var(--mono);font-size:12px;color:var(--text2);line-height:1.8">
+              stopLoss = entry - ATR14 × SLmultiplier(horizon)<br>
+              takeProfit = entry + ATR14 × TPmultiplier(horizon)
+            </div>
+            <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.7">
+              SHORT: SL = entry - 1.2 × ATR14, TP = entry + 2.0 × ATR14<br>
+              MEDIUM: SL = entry - 1.5 × ATR14, TP = entry + 2.5 × ATR14<br>
+              LONG: SL = entry - 2.0 × ATR14, TP = entry + 4.0 × ATR14
+            </div>
+          </div>
+
+          <div style="padding:14px;border:1px solid var(--border);border-radius:12px;background:var(--bg)">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="font-family:var(--mono);font-size:11px;color:var(--amber)">H. MODULE BOUNDARIES</div>
+              <span style="padding:2px 8px;border-radius:999px;border:1px solid var(--border);font-family:var(--mono);font-size:10px;color:var(--text3)">What is and is not a backtest</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);line-height:1.6;margin-top:10px">Historical Pattern Analogs is not a backtest. It scans for past RSI-zone and MA50-position analogs and reports forward 5-day / 10-day outcomes. It is context, not trade simulation.</div>
+            <div style="margin-top:10px;font-size:12px;color:var(--text2);line-height:1.6">The backtest strategy named <span style="font-family:var(--mono)">trade-recommendation</span> reuses the shared price-and-technical signal core, but it does not replay historical sentiment, macro headlines, analyst revisions, or fundamental release timing.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/renderers/portfolio.js"></script>
+<script src="js/renderers/backtest.js"></script>
+<script src="js/renderers/market-intelligence.js"></script>
+<script src="js/renderers/eda.js"></script>
+<script src="js/renderers/recommendation.js"></script>
+<script src="js/core/ui-shell.js"></script>
+<script src="js/core/ui-charts.js"></script>
+<script src="js/core/ui-export.js"></script>
+<script src="js/core/ui-flow-overview.js"></script>
+<script src="js/core/ui-reports.js"></script>
+<script src="js/core/ui-llm-controls.js"></script>
+<script src="js/core/ui-chat-runtime.js"></script>
+<script src="js/core/ui-orchestration.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

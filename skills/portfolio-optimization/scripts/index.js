@@ -73,6 +73,197 @@ function buildDerivedMarketMetrics(marketDataArray = []) {
   };
 }
 
+function computeMean(values = []) {
+  if (!Array.isArray(values) || values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function computeCovarianceMatrix(logReturns = [], annualizationFactor = 252) {
+  const assetCount = logReturns.length;
+  const matrix = Array.from({ length: assetCount }, () => Array(assetCount).fill(0));
+
+  for (let i = 0; i < assetCount; i += 1) {
+    for (let j = i; j < assetCount; j += 1) {
+      const left = Array.isArray(logReturns[i]) ? logReturns[i] : [];
+      const right = Array.isArray(logReturns[j]) ? logReturns[j] : [];
+      const commonLength = Math.min(left.length, right.length);
+      if (commonLength < 2) {
+        matrix[i][j] = i === j ? 1e-6 : 0;
+        matrix[j][i] = matrix[i][j];
+        continue;
+      }
+
+      const leftSeries = left.slice(-commonLength);
+      const rightSeries = right.slice(-commonLength);
+      const leftMean = computeMean(leftSeries);
+      const rightMean = computeMean(rightSeries);
+      let covariance = 0;
+      for (let k = 0; k < commonLength; k += 1) {
+        covariance += (leftSeries[k] - leftMean) * (rightSeries[k] - rightMean);
+      }
+      covariance = commonLength > 1 ? covariance / (commonLength - 1) : 0;
+      const annualized = covariance * annualizationFactor;
+      matrix[i][j] = i === j ? Math.max(annualized, 1e-6) : annualized;
+      matrix[j][i] = matrix[i][j];
+    }
+  }
+
+  return matrix;
+}
+
+function matrixVectorMultiply(matrix, vector) {
+  return matrix.map((row) => row.reduce((sum, value, index) => sum + value * vector[index], 0));
+}
+
+function dotProduct(left = [], right = []) {
+  return left.reduce((sum, value, index) => sum + value * (right[index] || 0), 0);
+}
+
+function quadraticForm(weights = [], matrix = []) {
+  const mv = matrixVectorMultiply(matrix, weights);
+  return dotProduct(weights, mv);
+}
+
+function getOptimizationSettings(timeHorizon = 'MEDIUM', macroRisk = 'MEDIUM', assetCount = 1) {
+  const targetGrossWeight = macroRisk === 'HIGH'
+    ? 0.78
+    : macroRisk === 'LOW'
+      ? 0.95
+      : 0.88;
+
+  const baseMaxWeight = timeHorizon === 'LONG'
+    ? 0.20
+    : timeHorizon === 'SHORT'
+      ? 0.14
+      : 0.16;
+
+  const feasibleMinMaxWeight = (targetGrossWeight / Math.max(1, assetCount)) + 0.10;
+  const maxWeight = clamp(Math.max(baseMaxWeight, feasibleMinMaxWeight), 0.08, 0.55);
+  const riskAversion = macroRisk === 'HIGH' ? 10 : macroRisk === 'LOW' ? 4 : 6;
+
+  return {
+    targetGrossWeight,
+    maxWeight,
+    riskAversion,
+    iterations: 140,
+    stepSize: 0.08,
+    riskFreeRate: 0.03,
+  };
+}
+
+function projectWeights(proposedWeights, targetGrossWeight, maxWeight) {
+  const projected = proposedWeights.map((value) => clamp(value, 0, maxWeight));
+  let total = projected.reduce((sum, value) => sum + value, 0);
+
+  if (total > targetGrossWeight && total > 0) {
+    const scale = targetGrossWeight / total;
+    return projected.map((value) => value * scale);
+  }
+
+  let remaining = Math.max(0, targetGrossWeight - total);
+  let guard = 0;
+  while (remaining > 1e-9 && guard < 10) {
+    const candidates = projected
+      .map((value, index) => ({ value, index }))
+      .filter((item) => item.value < maxWeight - 1e-9);
+    if (!candidates.length) break;
+
+    const importance = candidates.map(({ index }) => Math.max(1e-6, proposedWeights[index], projected[index]));
+    const totalImportance = importance.reduce((sum, value) => sum + value, 0);
+    let consumed = 0;
+
+    candidates.forEach((candidate, idx) => {
+      const desired = totalImportance > 0
+        ? remaining * (importance[idx] / totalImportance)
+        : remaining / candidates.length;
+      const add = Math.min(maxWeight - projected[candidate.index], desired);
+      projected[candidate.index] += add;
+      consumed += add;
+    });
+
+    if (consumed <= 1e-9) break;
+    remaining -= consumed;
+    total += consumed;
+    guard += 1;
+  }
+
+  return projected;
+}
+
+function estimateExpectedReturnPct(data, timeHorizon = 'MEDIUM') {
+  const adjustedComposite = safeNumber(data?.adjustedComposite, 50);
+  const scoreTilt = clamp((adjustedComposite - 50) / 35, -1, 1);
+  const upside = clamp(safeNumber(data?.analystConsensus?.upside, 0), -40, 40);
+  const sentimentScore = clamp(safeNumber(data?.sentimentScore, 0), -1, 1);
+  const scoreRange = timeHorizon === 'LONG' ? 14 : timeHorizon === 'SHORT' ? 10 : 12;
+
+  const scoreComponent = scoreTilt * scoreRange;
+  const analystComponent = upside * 0.35;
+  const sentimentComponent = sentimentScore * 2;
+
+  return clamp(scoreComponent + analystComponent + sentimentComponent, -20, 30);
+}
+
+function optimizePortfolioWeights(expectedReturnsPct, covarianceMatrix, settings) {
+  const assetCount = expectedReturnsPct.length;
+  if (assetCount === 0) return [];
+
+  const expectedReturns = expectedReturnsPct.map((value) => safeNumber(value, 0) / 100);
+  const preferences = expectedReturns.map((value) => Math.max(0.001, value + 0.02));
+  const prefTotal = preferences.reduce((sum, value) => sum + value, 0);
+  let weights = preferences.map((value) => (value / prefTotal) * settings.targetGrossWeight);
+  weights = projectWeights(weights, settings.targetGrossWeight, settings.maxWeight);
+
+  for (let iteration = 0; iteration < settings.iterations; iteration += 1) {
+    const sigmaW = matrixVectorMultiply(covarianceMatrix, weights);
+    const gradient = expectedReturns.map((value, index) => value - (2 * settings.riskAversion * sigmaW[index]));
+    const candidate = weights.map((value, index) => value + settings.stepSize * gradient[index]);
+    weights = projectWeights(candidate, settings.targetGrossWeight, settings.maxWeight);
+  }
+
+  return weights;
+}
+
+function computePortfolioRiskMetrics(weights, expectedReturnsPct, covarianceMatrix, riskFreeRate = 0.03, tickers = []) {
+  if (!weights.length) {
+    return {
+      expectedReturn: 0,
+      expectedVolatility: 0,
+      sharpeRatio: 0,
+      riskContribution: [],
+    };
+  }
+
+  const expectedReturns = expectedReturnsPct.map((value) => safeNumber(value, 0) / 100);
+  const expectedReturnDec = dotProduct(weights, expectedReturns);
+  const portfolioVariance = Math.max(0, quadraticForm(weights, covarianceMatrix));
+  const portfolioVolatility = Math.sqrt(portfolioVariance);
+  const sigmaW = matrixVectorMultiply(covarianceMatrix, weights);
+  const riskContribution = portfolioVolatility > 0
+    ? weights.map((weight, index) => {
+      const contribution = (weight * sigmaW[index]) / portfolioVolatility;
+      return {
+        ticker: tickers[index] || `Asset ${index + 1}`,
+        contributionPct: parseFloat(((contribution / portfolioVolatility) * 100).toFixed(1)),
+      };
+    })
+    : weights.map((weight, index) => ({
+      ticker: tickers[index] || `Asset ${index + 1}`,
+      contributionPct: 0,
+    }));
+
+  const sharpeRatio = portfolioVolatility > 0
+    ? (expectedReturnDec - riskFreeRate) / portfolioVolatility
+    : 0;
+
+  return {
+    expectedReturn: parseFloat((expectedReturnDec * 100).toFixed(1)),
+    expectedVolatility: parseFloat((portfolioVolatility * 100).toFixed(1)),
+    sharpeRatio: parseFloat(sharpeRatio.toFixed(2)),
+    riskContribution,
+  };
+}
+
 function summarizeDataSources(marketDataArray) {
   const sourceBreakdown = {
     live: 0,
@@ -653,21 +844,16 @@ function groupBySector(marketDataArray, scores) {
 
 // Assign portfolio actions based on score
 function getActionFromScore(score) {
-  if (score >= 75) {
-    return { action: 'STRONG BUY', allocation: 8 };
-  } else if (score >= 60) {
-    return { action: 'BUY', allocation: 5 };
-  } else if (score >= 45) {
-    return { action: 'HOLD', allocation: 3 };
-  } else if (score >= 30) {
-    return { action: 'REDUCE', allocation: 1 };
-  } else {
-    return { action: 'SELL', allocation: 0 };
-  }
+  if (score >= 75) return { action: 'STRONG BUY' };
+  if (score >= 60) return { action: 'BUY' };
+  if (score >= 45) return { action: 'HOLD' };
+  if (score >= 30) return { action: 'REDUCE' };
+  return { action: 'SELL' };
 }
 
 // Compute diversification metrics
-function computeDiversificationMetrics(allocations, correlationMatrix) {
+function computeDiversificationMetrics(rankedTickers, correlationMatrix) {
+  const allocations = rankedTickers.map((item) => safeNumber(item.allocation, 0));
   const n = allocations.length;
   let concentration = 0;
   
@@ -689,7 +875,13 @@ function computeDiversificationMetrics(allocations, correlationMatrix) {
     return count > 0 ? sum / count : 0;
   })();
   
-  const sectorConcentration = allocations.reduce((max, a) => Math.max(max, a), 0) / 100;
+  const sectorWeights = rankedTickers.reduce((acc, item) => {
+    const sector = item.sector || 'Unknown';
+    acc[sector] = (acc[sector] || 0) + safeNumber(item.allocation, 0);
+    return acc;
+  }, {});
+  const sectorConcentration = Math.max(0, ...Object.values(sectorWeights)) / 100;
+  const herfindahlIndex = allocations.reduce((sum, value) => sum + (value / 100) ** 2, 0);
   
   const riskAssessmentScore = concentration * 100;
   let riskAssessment = 'LOW';
@@ -700,6 +892,7 @@ function computeDiversificationMetrics(allocations, correlationMatrix) {
     correlationWeightedConcentration: parseFloat(concentration.toFixed(3)),
     avgPairwiseCorrelation: parseFloat(avgPairwiseCorr.toFixed(3)),
     sectorConcentration: parseFloat(sectorConcentration.toFixed(3)),
+    herfindahlIndex: parseFloat(herfindahlIndex.toFixed(3)),
     riskAssessment: `${riskAssessment} - Concentration: ${riskAssessmentScore.toFixed(0)}`,
   };
 }
@@ -717,7 +910,7 @@ function buildRuleBasedPortfolioNarrative({ rankedTickers, sectorAnalysis, diver
   if (strongestSector) {
     executiveSummaryParts.push(`strongest sector is ${strongestSector.sector} (${strongestSector.sectorStrength.toFixed(1)})`);
   }
-  executiveSummaryParts.push(`expected blended upside is ${expectedReturn.toFixed(1)}%`);
+  executiveSummaryParts.push(`expected portfolio return is ${expectedReturn.toFixed(1)}%`);
 
   const executiveSummary = `${executiveSummaryParts.join('; ')}.`;
 
@@ -834,16 +1027,15 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   
   rankedData.sort((a, b) => b.adjustedComposite - a.adjustedComposite);
 
-  const allocationScale = macroRegime.riskLevel === 'HIGH'
-    ? 0.9
-    : macroRegime.riskLevel === 'LOW'
-      ? 1.03
-      : 0.98;
+  const optimizationSettings = getOptimizationSettings(timeHorizon, macroRegime.riskLevel, rankedData.length);
+  const expectedReturnsPct = rankedData.map((data) => estimateExpectedReturnPct(data, timeHorizon));
+  const covarianceMatrix = computeCovarianceMatrix(derivedMetrics.logReturns);
+  const optimizedWeights = optimizePortfolioWeights(expectedReturnsPct, covarianceMatrix, optimizationSettings);
   
   // Assign actions and allocations
   const rankedTickers = rankedData.map((data, rank) => {
-    const { action, allocation } = getActionFromScore(data.adjustedComposite);
-    const scaledAllocation = clamp(allocation * allocationScale, 0, 10);
+    const { action } = getActionFromScore(data.adjustedComposite);
+    const optimizedAllocation = safeNumber(optimizedWeights[rank], 0) * 100;
     return {
       rank: rank + 1,
       ticker: data.ticker,
@@ -856,7 +1048,8 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
       macroReasons: data.macroReasons,
       eventAdjustment: data.eventAdjustment,
       eventReasons: data.eventReasons,
-      allocation: parseFloat(scaledAllocation.toFixed(1)),
+      allocation: parseFloat(optimizedAllocation.toFixed(1)),
+      expectedReturn: parseFloat(safeNumber(expectedReturnsPct[rank], 0).toFixed(1)),
       scores: {
         momentum: data.momentum,
         quality: data.quality,
@@ -886,10 +1079,17 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
   });
   
   // Compute diversification
-  const diversificationMetrics = computeDiversificationMetrics(allocations, correlationMatrix);
+  const diversificationMetrics = computeDiversificationMetrics(rankedTickers, correlationMatrix);
   
   // Estimate portfolio metrics
-  const expectedReturn = rankedTickers.reduce((sum, rt) => sum + (rt.upside * rt.allocation / 100), 0);
+  const riskMetrics = computePortfolioRiskMetrics(
+    rankedTickers.map((item) => item.allocation / 100),
+    expectedReturnsPct,
+    covarianceMatrix,
+    optimizationSettings.riskFreeRate,
+    rankedTickers.map((item) => item.ticker),
+  );
+  const expectedReturn = riskMetrics.expectedReturn;
   let portfolioNarrative = buildRuleBasedPortfolioNarrative({
     rankedTickers,
     sectorAnalysis,
@@ -921,11 +1121,15 @@ async function runPortfolioOptimization({ tickers, useMarketData = [], timeHoriz
     macroRegime,
     eventRegimeOverlay,
     portfolioMetrics: {
-      totalAllocation: totalAllocation,
-      cashBuffer: 100 - totalAllocation,
-      expectedReturn: parseFloat(expectedReturn.toFixed(1)),
-      expectedVolatility: 0, // Simplified; would require std computation
-      sharpeRatio: 0, // Simplified
+      totalAllocation: parseFloat(totalAllocation.toFixed(1)),
+      cashBuffer: parseFloat((100 - totalAllocation).toFixed(1)),
+      expectedReturn: riskMetrics.expectedReturn,
+      expectedVolatility: riskMetrics.expectedVolatility,
+      sharpeRatio: riskMetrics.sharpeRatio,
+      optimizationMethod: 'constrained-mean-variance',
+      maxPositionWeight: parseFloat((optimizationSettings.maxWeight * 100).toFixed(1)),
+      targetInvestedWeight: parseFloat((optimizationSettings.targetGrossWeight * 100).toFixed(1)),
+      riskContribution: riskMetrics.riskContribution,
     },
     portfolioNarrative,
     llmNarrative: portfolioNarrative,
