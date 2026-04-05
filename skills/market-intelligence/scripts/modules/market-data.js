@@ -824,11 +824,14 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
           summary: (n.summary || n.description || '').substring(0, 200),
           sentiment: yahooScores[i] ?? 0,
           source: n.publisher || 'Yahoo Finance',
+          url: n.link || n.clickThroughUrl?.url || '',
           hoursAgo: (() => {
             const ts = n.providerPublishTime;
             if (!ts) return 0;
             let publishMs = 0;
-            if (typeof ts === 'number') {
+            if (ts instanceof Date) {
+              publishMs = ts.getTime();
+            } else if (typeof ts === 'number') {
               publishMs = ts > 1e12 ? ts : ts * 1000;
             } else if (typeof ts === 'string') {
               if (/^\d+$/.test(ts)) {
@@ -840,6 +843,24 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
             }
             if (!Number.isFinite(publishMs) || publishMs <= 0) return 0;
             return Math.max(0, Math.round((Date.now() - publishMs) / 3600000));
+          })(),
+          publishedAt: (() => {
+            const ts = n.providerPublishTime;
+            if (!ts) return null;
+            let publishMs = 0;
+            if (ts instanceof Date) {
+              publishMs = ts.getTime();
+            } else if (typeof ts === 'number') {
+              publishMs = ts > 1e12 ? ts : ts * 1000;
+            } else if (typeof ts === 'string') {
+              if (/^\d+$/.test(ts)) {
+                const numericTs = Number(ts);
+                publishMs = numericTs > 1e12 ? numericTs : numericTs * 1000;
+              } else {
+                publishMs = Date.parse(ts);
+              }
+            }
+            return Number.isFinite(publishMs) && publishMs > 0 ? new Date(publishMs).toISOString() : null;
           })(),
         }));
 
@@ -866,7 +887,15 @@ async function fetchYahooFinanceData(ticker, dependencies = {}) {
           }, dependencies);
           result = allNews.map((news) => {
             const llmVersion = llmScored.find((n) => n.title === news.title);
-            return llmVersion || news;
+            return llmVersion
+              ? {
+                  ...news,
+                  ...llmVersion,
+                  url: news.url || llmVersion.url || '',
+                  source: news.source || llmVersion.source || '',
+                  publishedAt: news.publishedAt || llmVersion.publishedAt || null,
+                }
+              : news;
           });
         }
         perfMs.companyNewsLlm = Date.now() - startCompanyLlm;

@@ -146,6 +146,7 @@ async function fetchNewsApiMacroNews() {
       source: await resolveArticleSourceLabel(article.url, article.source?.name || 'NewsAPI'),
       sentiment: scores[index] ?? 0,
       hoursAgo: safeNumber(article.__hoursAgo, hoursAgoFromDate(article.publishedAt)),
+      publishedAt: article.publishedAt || null,
       theme: article.__theme || detectMacroTheme(`${article.title || ''} ${article.description || ''}`),
       scope: 'macro',
     }));
@@ -197,6 +198,7 @@ async function fetchGoogleNewsRssQuery(queryStr) {
         url: link,
         source: 'Google News',
         hoursAgo: publishMs > 0 ? Math.max(0, Math.round((Date.now() - publishMs) / 3600000)) : 0,
+        publishedAt: publishMs > 0 ? new Date(publishMs).toISOString() : null,
       });
     }
 
@@ -273,6 +275,7 @@ async function fetchLatestCentralBankDecision(bank) {
       source: article.source?.name || 'NewsAPI',
       sentiment: 0,
       hoursAgo: hoursAgoFromDate(article.publishedAt),
+      publishedAt: article.publishedAt || null,
       theme: 'MONETARY_POLICY',
       scope: 'macro',
       bank,
@@ -310,6 +313,7 @@ async function fetchAsxAnnouncements(ticker) {
         source: 'ASX Announcements',
         sentiment: scores[i] ?? 0,
         hoursAgo,
+        publishedAt: releasedAt > 0 ? new Date(releasedAt).toISOString() : null,
       };
     });
   } catch (error) {
@@ -347,7 +351,12 @@ async function fetchGoogleNewsRss(ticker, companyName) {
       if (!title) continue;
       const publishMs = pubDate ? Date.parse(pubDate) : 0;
       const hoursAgo = publishMs > 0 ? Math.max(0, Math.round((Date.now() - publishMs) / 3600000)) : 0;
-      items.push({ title, link, hoursAgo });
+      items.push({
+        title,
+        link,
+        hoursAgo,
+        publishedAt: publishMs > 0 ? new Date(publishMs).toISOString() : null,
+      });
     }
 
     if (items.length === 0) return [];
@@ -360,6 +369,7 @@ async function fetchGoogleNewsRss(ticker, companyName) {
       source: await resolveArticleSourceLabel(item.link, 'Google News'),
       sentiment: scores[i] ?? 0,
       hoursAgo: item.hoursAgo,
+      publishedAt: item.publishedAt,
     }));
     return await Promise.all(itemsPromises);
   } catch (error) {

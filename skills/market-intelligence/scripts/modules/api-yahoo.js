@@ -16,6 +16,26 @@ function getYahooFinance() {
   return _yf;
 }
 
+function parseYahooPublishTime(value) {
+  if (!value) return 0;
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isFinite(time) ? time : 0;
+  }
+  if (typeof value === 'number') {
+    return value > 1e12 ? value : value * 1000;
+  }
+  if (typeof value === 'string') {
+    if (/^\d+$/.test(value)) {
+      const numericTs = Number(value);
+      return numericTs > 1e12 ? numericTs : numericTs * 1000;
+    }
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
 async function fetchYahooSummaryProfile(ticker) {
   try {
     const yf = getYahooFinance();
@@ -53,18 +73,7 @@ async function fetchYahooCompanyNewsFallback(ticker, { companyName = '', sector 
 
     const scores = scoreSentimentsWithRules(yahooItems.map((item) => item.title || ''));
     const baseNewsPromises = yahooItems.map(async (item, index) => {
-      const ts = item.providerPublishTime;
-      let publishMs = 0;
-      if (typeof ts === 'number') {
-        publishMs = ts > 1e12 ? ts : ts * 1000;
-      } else if (typeof ts === 'string') {
-        if (/^\d+$/.test(ts)) {
-          const numericTs = Number(ts);
-          publishMs = numericTs > 1e12 ? numericTs : numericTs * 1000;
-        } else {
-          publishMs = Date.parse(ts);
-        }
-      }
+      const publishMs = parseYahooPublishTime(item.providerPublishTime);
 
       const url = item.link || item.clickThroughUrl?.url || '';
       return {
@@ -76,6 +85,7 @@ async function fetchYahooCompanyNewsFallback(ticker, { companyName = '', sector 
         hoursAgo: Number.isFinite(publishMs) && publishMs > 0
           ? Math.max(0, Math.round((Date.now() - publishMs) / 3600000))
           : 0,
+        publishedAt: Number.isFinite(publishMs) && publishMs > 0 ? new Date(publishMs).toISOString() : null,
       };
     });
     const baseNews = await Promise.all(baseNewsPromises);
@@ -95,7 +105,18 @@ async function fetchYahooCompanyNewsFallback(ticker, { companyName = '', sector 
       dependencies
     );
 
-    return baseNews.map((article) => llmScored.find((item) => item.title === article.title) || article);
+    return baseNews.map((article) => {
+      const llmVersion = llmScored.find((item) => item.title === article.title);
+      return llmVersion
+        ? {
+            ...article,
+            ...llmVersion,
+            url: article.url || llmVersion.url || '',
+            source: article.source || llmVersion.source || '',
+            publishedAt: article.publishedAt || llmVersion.publishedAt || null,
+          }
+        : article;
+    });
   } catch {
     return [];
   }

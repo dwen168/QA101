@@ -28,6 +28,7 @@ async function fetchFinnhubNews(ticker, context = {}, dependencies = {}) {
       source: await resolveArticleSourceLabel(article.url, article.source || 'Finnhub'),
       sentiment: scores[i] ?? 0,
       hoursAgo: Math.round((Date.now() - (article.datetime * 1000)) / 3600000),
+      publishedAt: safeNumber(article.datetime) > 0 ? new Date(safeNumber(article.datetime) * 1000).toISOString() : null,
     }));
     const ruleScoredNews = await Promise.all(ruleScoredNewsPromises);
 
@@ -50,7 +51,15 @@ async function fetchFinnhubNews(ticker, context = {}, dependencies = {}) {
       }, dependencies);
       return ruleScoredNews.map((news) => {
         const llmVersion = llmScored.find((n) => n.title === news.title);
-        return llmVersion || news;
+        return llmVersion
+          ? {
+              ...news,
+              ...llmVersion,
+              url: news.url || llmVersion.url || '',
+              source: news.source || llmVersion.source || '',
+              publishedAt: news.publishedAt || llmVersion.publishedAt || null,
+            }
+          : news;
       });
     }
 
@@ -88,6 +97,7 @@ async function fetchFinnhubMacroNews() {
       source: await resolveArticleSourceLabel(article.url, article.source || 'Finnhub General'),
       sentiment: scores[index] ?? 0,
       hoursAgo: Math.round((Date.now() - (safeNumber(article.datetime) * 1000)) / 3600000),
+      publishedAt: safeNumber(article.datetime) > 0 ? new Date(safeNumber(article.datetime) * 1000).toISOString() : null,
       theme: detectMacroTheme(`${article.headline || ''} ${article.summary || ''}`),
       scope: 'macro',
     }));
