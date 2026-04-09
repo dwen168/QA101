@@ -833,9 +833,9 @@ async function insertTickerFundamentalIfNew(pool, fundamental) {
   }
 }
 
-async function main() {
-  const dryRun = hasFlag('--dry-run');
-  const tickers = parseTickers();
+async function main(opts = {}) {
+  const dryRun = opts.dryRun !== undefined ? opts.dryRun : hasFlag('--dry-run');
+  const tickers = opts.tickers !== undefined ? opts.tickers : parseTickers();
 
   console.log(`[sync] Macro mode: shared global news. Ticker mode: ${tickers.length} symbols.`);
 
@@ -936,7 +936,11 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('[sync] Failed:', error.message);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('[sync] Failed:', error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { main };
