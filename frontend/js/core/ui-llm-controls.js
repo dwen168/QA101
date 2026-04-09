@@ -3,7 +3,7 @@
 const API_BASE = '/api';
 const DEFAULT_MODELS = {
   deepseek: 'deepseek-chat',
-  gemini: 'gemma-3-27b-it',
+  gemini: 'gemini-2.5-flash',
   ollama: 'qwen3.5:9b',
 };
 const PROVIDER_LABELS = {
@@ -13,7 +13,7 @@ const PROVIDER_LABELS = {
 };
 const MODEL_PRESETS = {
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-  gemini: ['gemma-3-27b-it'],
+  gemini: ['gemini-2.5-flash'],
   ollama: [],
 };
 const STORAGE_KEYS = {
