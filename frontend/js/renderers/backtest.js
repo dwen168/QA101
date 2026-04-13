@@ -9,7 +9,37 @@ function renderBacktestReport(report, panel) {
   const trades = report.tradeLog || [];
   const drawdown = report.drawdownAnalysis || {};
   const risk = report.riskAnalysis || {};
+  const scoreBucketStats = Array.isArray(metrics.scoreBucketStats) ? metrics.scoreBucketStats : [];
+  const holdingPeriodStats = Array.isArray(metrics.holdingPeriodStats) ? metrics.holdingPeriodStats : [];
   const dataSource = String(report.dataSource || '').toLowerCase();
+  const pickDateString = (value) => {
+    if (value == null) return null;
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    if (typeof value === 'string' || typeof value === 'number') {
+      const text = String(value).trim();
+      if (!text) return null;
+      if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+      const dt = new Date(text);
+      return Number.isNaN(dt.getTime()) ? text.slice(0, 10) : dt.toISOString().slice(0, 10);
+    }
+    if (typeof value === 'object') {
+      const candidate = value.date ?? value.value ?? value.raw ?? value.iso ?? value.timestamp;
+      return pickDateString(candidate);
+    }
+    return null;
+  };
+  const pickNumber = (value) => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (value && typeof value === 'object') {
+      const candidate = value.value ?? value.raw ?? value.amount ?? value.price ?? value.capital;
+      return pickNumber(candidate);
+    }
+    return null;
+  };
 
   const section = document.createElement('div');
   section.className = 'section-divider fade-in';
@@ -48,7 +78,9 @@ function renderBacktestReport(report, panel) {
       window.__lastAnalysisSnapshot = null;
     } else {
       if (window.__lastAnalysisPanelHtml) {
-        panelMain.innerHTML = window.__lastAnalysisPanelHtml;
+        panelMain.innerHTML = typeof window.sanitizeHtmlFragment === 'function'
+          ? window.sanitizeHtmlFragment(window.__lastAnalysisPanelHtml)
+          : window.__lastAnalysisPanelHtml;
         window.__lastAnalysisPanelHtml = null;
       } else {
         addMessage('bot', 'No previous analysis snapshot available. Please re-run the analysis.');
@@ -118,9 +150,32 @@ function renderBacktestReport(report, panel) {
       <span class="detail-chip">Sell signals: ${signalDist.sellSignals ?? 0}</span>
       <span class="detail-chip">Hold days: ${signalDist.holdDays ?? 0}</span>
       <span class="detail-chip">Avg trade: ${(metrics.avgTradeReturn ?? 0).toFixed(2)}%</span>
+      <span class="detail-chip">Expectancy: ${(metrics.expectancyPct ?? 0).toFixed(2)}%</span>
+      <span class="detail-chip">Expectancy $: $${(metrics.expectancyDollars ?? 0).toFixed(2)}</span>
     </div>
   `;
   panel.appendChild(metricsCard);
+
+  if (scoreBucketStats.length || holdingPeriodStats.length) {
+    const diagnosticsCard = document.createElement('div');
+    diagnosticsCard.className = 'card fade-in';
+    diagnosticsCard.innerHTML = `
+      <div class="card-header"><span class="card-title">Backtest Diagnostics</span></div>
+      ${scoreBucketStats.length ? `
+        <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Score Bucket Win Rate</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
+          ${scoreBucketStats.map((item) => `<span class="detail-chip">${item.bucket}: ${item.trades} trades · WR ${item.winRate}% · Avg ${item.avgReturn > 0 ? '+' : ''}${item.avgReturn}%</span>`).join('')}
+        </div>
+      ` : ''}
+      ${holdingPeriodStats.length ? `
+        <div style="font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Holding Period Outcome</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          ${holdingPeriodStats.map((item) => `<span class="detail-chip">${item.bucket}: ${item.trades} trades · WR ${item.winRate}% · Avg ${item.avgReturn > 0 ? '+' : ''}${item.avgReturn}%</span>`).join('')}
+        </div>
+      ` : ''}
+    `;
+    panel.appendChild(diagnosticsCard);
+  }
 
   const riskCard = document.createElement('div');
   riskCard.className = 'card fade-in';
@@ -179,22 +234,30 @@ function renderBacktestReport(report, panel) {
     });
 
     const priceHistory = (report.priceHistory || []).map(p => ({
-      time: String(p.date).slice(0, 10),
-      open: p.open, high: p.high, low: p.low, close: p.close,
-    }));
+      time: pickDateString(p.date),
+      open: pickNumber(p.open),
+      high: pickNumber(p.high),
+      low: pickNumber(p.low),
+      close: pickNumber(p.close),
+    })).filter((p) => p.time && p.open != null && p.high != null && p.low != null && p.close != null);
     if (priceHistory.length) btCandles.setData(priceHistory);
 
     const btMarkers = [];
     trades.forEach(t => {
+      const entryDate = pickDateString(t.entryDate);
+      const exitDate = pickDateString(t.exitDate);
+      const entryPrice = pickNumber(t.entryPrice);
+      const pnlValue = pickNumber(t.pnlDollars ?? t.pnlPercent);
+      const pnlAbs = Math.abs(pickNumber(t.pnlDollars) ?? 0).toFixed(2);
+      if (!entryDate || !exitDate || entryPrice == null) return;
       btMarkers.push({
-        time: String(t.entryDate).slice(0, 10),
+        time: entryDate,
         position: 'belowBar', color: '#10b981', shape: 'arrowUp',
-        text: `BUY $${t.entryPrice}`,
+        text: `BUY $${entryPrice.toFixed(2)}`,
       });
-      const isWin = (t.pnlDollars ?? t.pnlPercent) >= 0;
-      const pnlAbs = Math.abs(t.pnlDollars ?? 0).toFixed(2);
+      const isWin = (pnlValue ?? 0) >= 0;
       btMarkers.push({
-        time: String(t.exitDate).slice(0, 10),
+        time: exitDate,
         position: 'aboveBar',
         color: isWin ? '#10b981' : '#ef4444',
         shape: 'arrowDown',
@@ -216,13 +279,22 @@ function renderBacktestReport(report, panel) {
   setTimeout(() => {
     const ctx = document.getElementById('chart-backtest-equity')?.getContext('2d');
     if (!ctx) return;
+    const equitySeries = (equity || []).map((p) => ({
+      date: pickDateString(p?.date),
+      capital: pickNumber(p?.capital),
+    })).filter((p) => p.date && p.capital != null);
+
+    if (!equitySeries.length) {
+      return;
+    }
+
     currentCharts['backtest-equity'] = new Chart(ctx, {
       type: 'line',
       data: {
-        labels: equity.map(p => String(p.date).slice(0, 10)),
+        labels: equitySeries.map((p) => p.date),
         datasets: [{
           label: 'Balance',
-          data: equity.map(p => p.capital),
+          data: equitySeries.map((p) => p.capital),
           borderColor: '#3b82f6',
           backgroundColor: 'rgba(59,130,246,0.08)',
           fill: true, tension: 0.2, pointRadius: 0,
@@ -267,28 +339,36 @@ function renderBacktestReport(report, panel) {
     tradesCard.innerHTML = `
       <div class="card-header">
         <span class="card-title">Trade Log</span>
-        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">${trades.length} trades · initial $${(cap.initial ?? 1000).toLocaleString()}</span>
+        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">${trades.length} trades · initial $${(cap.initial ?? 10000).toLocaleString()}</span>
       </div>
       <div style="overflow-x:auto">
         <div style="display:grid;grid-template-columns:${COL};gap:8px;font-size:10px;font-family:var(--mono);color:var(--text3);text-transform:uppercase;letter-spacing:0.08em;padding:0 0 6px;border-bottom:1px solid var(--border);min-width:${MIN_W}">
           <span>#</span><span>Entry</span><span>Buy $</span><span>Exit</span><span>Sell $</span><span>%</span><span>$ P&amp;L</span><span>Balance</span><span>Reason</span>
         </div>
         ${trades.slice(0, 12).map(t => {
-          const win = t.pnlPercent >= 0;
+          const pnlPct = pickNumber(t.pnlPercent) ?? 0;
+          const win = pnlPct >= 0;
           const clr = win ? 'var(--green)' : 'var(--red)';
-          const pnlDollar = t.pnlDollars != null ? `${win ? '+' : '-'}$${Math.abs(t.pnlDollars).toFixed(2)}` : '—';
-          const balance = t.balanceAfter != null ? `$${t.balanceAfter.toFixed(2)}` : '—';
+          const pnlDollarRaw = pickNumber(t.pnlDollars);
+          const pnlDollar = pnlDollarRaw != null ? `${win ? '+' : '-'}$${Math.abs(pnlDollarRaw).toFixed(2)}` : '—';
+          const balanceRaw = pickNumber(t.balanceAfter);
+          const balance = balanceRaw != null ? `$${balanceRaw.toFixed(2)}` : '—';
+          const entryPrice = pickNumber(t.entryPrice);
+          const exitPrice = pickNumber(t.exitPrice);
+          const entryDate = pickDateString(t.entryDate) || '—';
+          const exitDate = pickDateString(t.exitDate) || '—';
+          const reason = String(t.reason || 'N/A');
           return `
             <div style="display:grid;grid-template-columns:${COL};gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:11px;font-family:var(--mono);min-width:${MIN_W}">
-              <span style="color:var(--text3)">${t.tradeId}</span>
-              <span>${String(t.entryDate).slice(0,10)}</span>
-              <span style="color:var(--text2)">$${t.entryPrice != null ? t.entryPrice.toFixed(2) : '—'}</span>
-              <span>${String(t.exitDate).slice(0,10)}</span>
-              <span style="color:var(--text2)">$${t.exitPrice != null ? t.exitPrice.toFixed(2) : '—'}</span>
-              <span style="color:${clr}">${win ? '+' : ''}${t.pnlPercent}%</span>
+              <span style="color:var(--text3)">${t.tradeId ?? '—'}</span>
+              <span>${entryDate}</span>
+              <span style="color:var(--text2)">$${entryPrice != null ? entryPrice.toFixed(2) : '—'}</span>
+              <span>${exitDate}</span>
+              <span style="color:var(--text2)">$${exitPrice != null ? exitPrice.toFixed(2) : '—'}</span>
+              <span style="color:${clr}">${win ? '+' : ''}${pnlPct}%</span>
               <span style="color:${clr}">${pnlDollar}</span>
               <span style="color:var(--text2)">${balance}</span>
-              <span style="color:var(--text3);font-size:10px">${t.reason.replace(/_/g,' ')}</span>
+              <span style="color:var(--text3);font-size:10px">${reason.replace(/_/g,' ')}</span>
             </div>
           `;
         }).join('')}

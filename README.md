@@ -109,6 +109,24 @@ ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key_here
 FINNHUB_API_KEY=your_finnhub_api_key_here
 NEWS_API_KEY=your_newsapi_api_key_here
 PORT=3001
+
+# Security (recommended)
+AUTH_TOKEN_SECRET=replace_with_a_long_random_secret
+CORS_ORIGIN=http://localhost:3001
+API_RATE_LIMIT_MAX=120
+API_RATE_LIMIT_WINDOW_MS=60000
+
+# Optional basic auth account (legacy plain password)
+AUTH_USERNAME=admin
+AUTH_PASSWORD=replace_me
+
+# Preferred auth account config (hashed password)
+# AUTH_USERS_JSON=[{"username":"admin","passwordHash":"pbkdf2$120000$<salt>$<hashHex>"}]
+```
+
+Generate a PBKDF2 password hash (recommended):
+```bash
+node -e "const c=require('crypto');const p=process.argv[1]||'change-me';const s=c.randomBytes(16).toString('hex');const i=120000;const h=c.pbkdf2Sync(p,s,i,32,'sha256').toString('hex');console.log(`pbkdf2$${i}$${s}$${h}`);" "your_password_here"
 ```
 
 Provider options:
@@ -321,6 +339,9 @@ Required environment variables on Vercel:
 - `ALPHA_VANTAGE_API_KEY`
 - `FINNHUB_API_KEY`
 - `NEWS_API_KEY`
+- `AUTH_TOKEN_SECRET` (must be set; default placeholder is blocked in production)
+- `CORS_ORIGIN` (comma-separated allowlist, e.g. `https://your-app.vercel.app`)
+- `CRON_SECRET` (required by `/api/cron/sync-news`)
 
 ## Disclaimer
 This is a demo application for educational purposes only.

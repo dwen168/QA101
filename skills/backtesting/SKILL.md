@@ -26,9 +26,9 @@ metadata:
       required: true
     - name: initialCapital
       type: number
-      description: Starting portfolio value in USD (default 100000)
+      description: Starting portfolio value in USD (default 10000)
       required: false
-      default: 100000
+      default: 10000
     - name: signalFunction
       type: string
       description: "Signal generator: 'trade-recommendation' (uses 15+ signals), 'macd-bb' (MACD × BB), 'rsi-ma' (RSI + MA combos)"
@@ -153,7 +153,7 @@ Generate detailed report:
       "tradingDays": 253
     },
     "capital": {
-      "initial": 100000,
+      "initial": 10000,
       "final": 118500,
       "totalReturn": 18.5
     },
@@ -179,8 +179,8 @@ Generate detailed report:
       }
     ],
     "equityCurve": [
-      { "date": "2025-01-01", "capital": 100000 },
-      { "date": "2025-01-15", "capital": 100000, "action": "BUY", "tradeId": 1 },
+      { "date": "2025-01-01", "capital": 10000 },
+      { "date": "2025-01-15", "capital": 10000, "action": "BUY", "tradeId": 1 },
       { "date": "2025-01-28", "capital": 105360, "action": "SELL", "tradeId": 1, "pnl": 5360 }
     ],
     "signalDistribution": {

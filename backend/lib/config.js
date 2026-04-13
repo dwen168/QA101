@@ -23,8 +23,9 @@ function parseAuthUsers() {
           .map((entry) => ({
             username: String(entry?.username || '').trim(),
             password: String(entry?.password || ''),
+            passwordHash: String(entry?.passwordHash || ''),
           }))
-          .filter((entry) => entry.username && entry.password);
+          .filter((entry) => entry.username && (entry.password || entry.passwordHash));
       }
     } catch {
       // Falls back to AUTH_USERNAME/AUTH_PASSWORD when AUTH_USERS_JSON is invalid.
@@ -34,7 +35,7 @@ function parseAuthUsers() {
   const username = String(process.env.AUTH_USERNAME || '').trim();
   const password = String(process.env.AUTH_PASSWORD || '');
   if (username && password) {
-    return [{ username, password }];
+    return [{ username, password, passwordHash: '' }];
   }
 
   return [];

@@ -4,7 +4,7 @@ const { parseJsonResponse, requireObject } = require('../../../backend/lib/utils
 const { getWeightsMetadata } = require('../../../backend/lib/weights-loader');
 const { calculateATR, calculateVaR } = require('../../../backend/lib/technical-indicators');
 
-const { normalizeTimeHorizon, getRecommendationProfile, buildObjectiveLensSummary } = require('./modules/profiles');
+const { normalizeTimeHorizon, getRecommendationProfile, mapActionFromScore, buildObjectiveLensSummary } = require('./modules/profiles');
 const { computeConfidence, generateConfidenceExplanation } = require('./modules/confidence');
 const { findHistoricalPatterns } = require('./modules/historical');
 const { scoreSignals, scoreBacktestSnapshot } = require('./modules/scoring');
@@ -13,12 +13,8 @@ const { runRecommendationBacktest } = require('./backtest');
 
 const skills = loadSkills();
 
-function mapAction(score) {
-  if (score >= 6) { return { action: 'STRONG BUY', actionColor: '#10b981' }; }
-  if (score >= 3) { return { action: 'BUY', actionColor: '#6ee7b7' }; }
-  if (score >= -2) { return { action: 'HOLD', actionColor: '#f59e0b' }; }
-  if (score >= -5) { return { action: 'SELL', actionColor: '#f87171' }; }
-  return { action: 'STRONG SELL', actionColor: '#dc2626' };
+function mapAction(score, timeHorizon = 'MEDIUM') {
+  return mapActionFromScore(score, timeHorizon);
 }
 
 function buildFallbackRecommendation(marketData, action, signals, confidence, buyRatio, profile) {
@@ -53,7 +49,7 @@ async function runTradeRecommendation({ marketData, edaInsights, timeHorizon = '
   const profile = getRecommendationProfile(normalizedTimeHorizon);
 
   const { signals, score, buyRatio, eventRegimeOverlay, policyOverlay } = scoreSignals(marketData, edaInsights || {}, normalizedTimeHorizon);
-  const { action, actionColor } = mapAction(score);
+  const { action, actionColor } = mapAction(score, normalizedTimeHorizon);
   const macroRisk = String(marketData?.macroContext?.riskLevel || '').toUpperCase();
   const confidenceResult = computeConfidence(score, signals, macroRisk);
   const confidence = confidenceResult.confidence;
@@ -195,12 +191,7 @@ function computeBacktestDecision({ priceHistory, timeHorizon = 'MEDIUM' } = {}) 
   }
   const idx = priceHistory.length - 1;
   const score = scoreBacktestSnapshot(priceHistory, idx, timeHorizon);
-  let action;
-  if (score >= 6) action = 'STRONG BUY';
-  else if (score >= 3) action = 'BUY';
-  else if (score <= -6) action = 'STRONG SELL';
-  else if (score <= -3) action = 'SELL';
-  else action = 'HOLD';
+  const { action } = mapAction(score, timeHorizon);
   return { score, action };
 }
 

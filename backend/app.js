@@ -16,6 +16,11 @@ const { runBacktest } = require('../skills/backtesting/scripts');
 function createApp() {
   const app = express();
   const skills = loadSkills();
+  const usingDefaultAuthSecret = String(config.authTokenSecret || '') === 'change-this-auth-token-secret';
+
+  if (config.isVercel && usingDefaultAuthSecret) {
+    throw new Error('AUTH_TOKEN_SECRET must be set to a strong value in production.');
+  }
 
   const authUsersByUsername = new Map(
     (config.authUsers || []).map((entry) => [String(entry.username || '').trim().toLowerCase(), entry])
@@ -23,6 +28,50 @@ function createApp() {
 
   const sanitizeUsername = (value) => String(value || '').trim();
   const findAuthUser = (username) => authUsersByUsername.get(sanitizeUsername(username).toLowerCase()) || null;
+  const safeBufferEquals = (left, right) => {
+    const leftBuf = Buffer.from(String(left || ''), 'utf8');
+    const rightBuf = Buffer.from(String(right || ''), 'utf8');
+    if (leftBuf.length !== rightBuf.length) return false;
+    return crypto.timingSafeEqual(leftBuf, rightBuf);
+  };
+  const verifyPassword = (user, password) => {
+    const passwordHash = String(user?.passwordHash || '').trim();
+
+    // Supported format: pbkdf2$iterations$salt$hashHex
+    if (passwordHash.startsWith('pbkdf2$')) {
+      const parts = passwordHash.split('$');
+      if (parts.length !== 4) return false;
+      const iterations = Number(parts[1]);
+      const salt = parts[2];
+      const expectedHex = parts[3];
+      if (!Number.isFinite(iterations) || iterations < 10000 || !salt || !expectedHex) {
+        return false;
+      }
+
+      const computed = crypto
+        .pbkdf2Sync(String(password || ''), salt, Math.floor(iterations), 32, 'sha256')
+        .toString('hex');
+      return safeBufferEquals(computed, expectedHex);
+    }
+
+    return safeBufferEquals(String(user?.password || ''), String(password || ''));
+  };
+  const sanitizeStringForHtml = (value) => String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  const sanitizeResponsePayload = (value) => {
+    if (typeof value === 'string') return sanitizeStringForHtml(value);
+    if (value instanceof Date) return value.toISOString();
+    if (Array.isArray(value)) return value.map((item) => sanitizeResponsePayload(item));
+    if (!value || typeof value !== 'object') return value;
+
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, sanitizeResponsePayload(item)])
+    );
+  };
   const toBase64Url = (value) => Buffer.from(value, 'utf8').toString('base64url');
   const fromBase64Url = (value) => Buffer.from(value, 'base64url').toString('utf8');
   const getAuthTokenSignature = (payloadB64) => crypto
@@ -125,10 +174,101 @@ function createApp() {
     return providers;
   };
 
-  app.use(cors());
+  const parseCorsOrigins = () => {
+    const raw = String(process.env.CORS_ORIGIN || '').trim();
+    if (!raw) return null;
+    const values = raw
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+    return values.length ? new Set(values) : null;
+  };
+
+  const allowedCorsOrigins = parseCorsOrigins();
+  const corsOptions = {
+    origin(origin, callback) {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (!allowedCorsOrigins) {
+        if (!config.isVercel) {
+          callback(null, true);
+          return;
+        }
+        callback(new Error('CORS origin is not allowed'));
+        return;
+      }
+
+      callback(null, allowedCorsOrigins.has(origin));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'OPTIONS'],
+  };
+
+  const loginAttempts = new Map();
+  const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+  const LOGIN_MAX_ATTEMPTS = 8;
+  const getClientIp = (req) => {
+    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    return forwarded || String(req.ip || req.socket?.remoteAddress || 'unknown');
+  };
+  const loginThrottleKey = (req, username) => `${getClientIp(req)}::${String(username || '').toLowerCase()}`;
+  const isLoginRateLimited = (req, username) => {
+    const key = loginThrottleKey(req, username);
+    const now = Date.now();
+    const history = (loginAttempts.get(key) || []).filter((ts) => now - ts < LOGIN_WINDOW_MS);
+    loginAttempts.set(key, history);
+    return history.length >= LOGIN_MAX_ATTEMPTS;
+  };
+  const recordFailedLogin = (req, username) => {
+    const key = loginThrottleKey(req, username);
+    const now = Date.now();
+    const history = (loginAttempts.get(key) || []).filter((ts) => now - ts < LOGIN_WINDOW_MS);
+    history.push(now);
+    loginAttempts.set(key, history);
+  };
+  const clearFailedLogins = (req, username) => {
+    loginAttempts.delete(loginThrottleKey(req, username));
+  };
+
+  const apiRequests = new Map();
+  const API_WINDOW_MS = Number(process.env.API_RATE_LIMIT_WINDOW_MS || 60 * 1000);
+  const API_MAX_REQUESTS = Number(process.env.API_RATE_LIMIT_MAX || 120);
+  const isRateLimited = (req) => {
+    const key = getClientIp(req);
+    const now = Date.now();
+    const history = (apiRequests.get(key) || []).filter((ts) => now - ts < API_WINDOW_MS);
+    history.push(now);
+    apiRequests.set(key, history);
+    return history.length > API_MAX_REQUESTS;
+  };
+
+  app.use(cors(corsOptions));
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://unpkg.com https://fonts.googleapis.com 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
+    next();
+  });
   app.use(express.json({ limit: '10mb' }));
   app.use((req, _res, next) => {
     req.auth = getAuthFromRequest(req);
+    next();
+  });
+  app.use('/api', (req, res, next) => {
+    if (req.path === '/health' || req.path === '/auth/status') {
+      next();
+      return;
+    }
+
+    if (isRateLimited(req)) {
+      res.status(429).json({ error: 'Too many requests. Please slow down.' });
+      return;
+    }
     next();
   });
 
@@ -152,16 +292,25 @@ function createApp() {
     const username = sanitizeUsername(req.body?.username);
     const password = String(req.body?.password || '');
 
+    if (isLoginRateLimited(req, username)) {
+      res.status(429).json({ error: 'Too many login attempts. Please try again later.' });
+      return;
+    }
+
     if (!username || !password) {
+      recordFailedLogin(req, username);
       res.status(400).json({ error: 'username and password are required' });
       return;
     }
 
     const user = findAuthUser(username);
-    if (!user || user.password !== password) {
+    if (!user || !verifyPassword(user, password)) {
+      recordFailedLogin(req, username);
       res.status(401).json({ error: 'Invalid username or password' });
       return;
     }
+
+    clearFailedLogins(req, username);
 
     const token = createAuthToken(user.username);
     setAuthCookie(res, token);
@@ -211,7 +360,7 @@ function createApp() {
   app.post('/api/skills/market-intelligence', async (req, res) => {
     try {
       const result = await runMarketIntelligence({ ticker: req.body.ticker });
-      res.json(result);
+      res.json(sanitizeResponsePayload(result));
     } catch (error) {
       handleRouteError(res, error);
     }
@@ -220,7 +369,7 @@ function createApp() {
   app.post('/api/skills/eda-visual-analysis', async (req, res) => {
     try {
       const result = await runEdaVisualAnalysis({ marketData: req.body.marketData });
-      res.json(result);
+      res.json(sanitizeResponsePayload(result));
     } catch (error) {
       handleRouteError(res, error);
     }
@@ -233,7 +382,7 @@ function createApp() {
         edaInsights: req.body.edaInsights,
         timeHorizon: req.body.timeHorizon || 'MEDIUM',
       });
-      res.json(result);
+      res.json(sanitizeResponsePayload(result));
     } catch (error) {
       handleRouteError(res, error);
     }
@@ -246,11 +395,11 @@ function createApp() {
         ticker: req.body.ticker,
         startDate: req.body.startDate,
         endDate: req.body.endDate,
-        initialCapital: req.body.initialCapital || 100000,
+        initialCapital: req.body.initialCapital || 10000,
         timeHorizon: req.body.timeHorizon || 'MEDIUM',
         apiKey: config.alphaVantageApiKey,
       });
-      res.json(result);
+      res.json(sanitizeResponsePayload(result));
     } catch (error) {
       handleRouteError(res, error);
     }
@@ -262,7 +411,7 @@ function createApp() {
       const priceHistory = req.body.priceHistory;
       const timeHorizon = String(req.body.timeHorizon || 'MEDIUM').toUpperCase();
       const result = computeBacktestDecision({ priceHistory, timeHorizon });
-      res.json(result);
+      res.json(sanitizeResponsePayload(result));
     } catch (err) {
       res.status(400).json({ error: String(err?.message || 'invalid request') });
     }
@@ -275,7 +424,7 @@ function createApp() {
         useMarketData: req.body.useMarketData,
         timeHorizon: req.body.timeHorizon || 'MEDIUM',
       });
-      res.json(result);
+      res.json(sanitizeResponsePayload(result));
     } catch (error) {
       handleRouteError(res, error);
     }
@@ -317,10 +466,10 @@ function createApp() {
         timeHorizon: req.body.timeHorizon || 'MEDIUM',
         startDate: req.body.startDate,
         endDate: req.body.endDate,
-        initialCapital: req.body.initialCapital || 100000,
+        initialCapital: req.body.initialCapital || 10000,
         apiKey: config.alphaVantageApiKey,
       });
-      res.json(result);
+      res.json(sanitizeResponsePayload(result));
     } catch (error) {
       handleRouteError(res, error);
     }
@@ -332,7 +481,7 @@ function createApp() {
         message: req.body.message,
         history: req.body.history || [],
       });
-      res.json(result);
+      res.json(sanitizeResponsePayload(result));
     } catch (error) {
       handleRouteError(res, error);
     }

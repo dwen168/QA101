@@ -9,7 +9,7 @@
  *     strategyName: 'trade-recommendation',
  *     startDate: '2025-01-01',
  *     endDate: '2026-03-18',
- *     initialCapital: 100000
+ *     initialCapital: 10000
  *   })
  */
 
@@ -17,6 +17,7 @@ const {
   calculateMACD,
   calculateBollingerBands,
 } = require('../../../backend/lib/technical-indicators');
+const { normalizeTimeHorizon, getRecommendationProfile, getActionThresholds } = require('../../trade-recommendation/scripts/modules/profiles');
 const { scoreBacktestSnapshot } = require('../../trade-recommendation/scripts/modules/scoring');
 const path = require('path');
 const config = require('../../../backend/lib/config');
@@ -27,47 +28,43 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(num) ? num : fallback;
 }
 
-function normalizeTimeHorizon(value = 'MEDIUM') {
-  const normalized = String(value || '').trim().toUpperCase();
-  return ['SHORT', 'MEDIUM', 'LONG'].includes(normalized) ? normalized : 'MEDIUM';
-}
-
 function getBacktestProfile(timeHorizon = 'MEDIUM') {
   const normalized = normalizeTimeHorizon(timeHorizon);
+  const recommendationProfile = getRecommendationProfile(normalized);
   const profiles = {
     SHORT: {
-      timeHorizon: 'SHORT',
-      label: 'Short-term tactical',
-      holdingPeriod: 'Up to 8 weeks',
-      atrStopMult: 1.2,        // aligned with trade-recommendation profile
-      atrTakeProfitMult: 2.0,
-      stopLossPct: 0.02,       // fallback if ATR unavailable
+      stopLossPct: 0.02,
       takeProfitPct: 0.05,
       maxHoldingDays: 40,
+      riskPerTradePct: 0.008,
+      maxCapitalAllocationPct: 0.35,
+      trailingAtrMultiplier: 1.0,
     },
     MEDIUM: {
-      timeHorizon: 'MEDIUM',
-      label: 'Medium-term balanced',
-      holdingPeriod: '2 to 6 months',
-      atrStopMult: 1.5,
-      atrTakeProfitMult: 2.5,
       stopLossPct: 0.03,
       takeProfitPct: 0.07,
       maxHoldingDays: 120,
+      riskPerTradePct: 0.01,
+      maxCapitalAllocationPct: 0.5,
+      trailingAtrMultiplier: 1.2,
     },
     LONG: {
-      timeHorizon: 'LONG',
-      label: 'Long-term trend/fundamental',
-      holdingPeriod: '6+ months',
-      atrStopMult: 2.0,
-      atrTakeProfitMult: 4.0,
       stopLossPct: 0.08,
       takeProfitPct: 0.2,
       maxHoldingDays: 252,
+      riskPerTradePct: 0.012,
+      maxCapitalAllocationPct: 0.65,
+      trailingAtrMultiplier: 1.5,
     },
   };
 
-  return profiles[normalized];
+  return {
+    ...recommendationProfile,
+    ...profiles[normalized],
+    atrStopMult: recommendationProfile.atrStopMultiplier,
+    atrTakeProfitMult: recommendationProfile.atrTargetMultiplier,
+    actionThresholds: getActionThresholds(normalized),
+  };
 }
 
 // Singleton Yahoo Finance instance resolved from workspace dependencies.
@@ -261,11 +258,11 @@ function generateSignal(priceData, index, signalType = 'trade-recommendation', t
   // Shared trade-recommendation scoring core — same signal engine as the
   // recommendation module, using only price-derivable indicators.
   const score = scoreBacktestSnapshot(priceData, index, timeHorizon);
-  if (score >= 6) return 'STRONG_BUY';
-  if (score >= 3) return 'BUY';
-  if (score >= -2 && score <= 2) return 'HOLD';
-  if (score <= -6) return 'STRONG_SELL';
-  if (score <= -3) return 'SELL';
+  const t = getActionThresholds(timeHorizon);
+  if (score >= t.strongBuy) return 'STRONG_BUY';
+  if (score >= t.buy) return 'BUY';
+  if (score <= t.strongSell) return 'STRONG_SELL';
+  if (score <= t.sell) return 'SELL';
   return 'HOLD';
 }
 
@@ -310,7 +307,7 @@ function calculateATR(priceData, endIndex, period = 14) {
 }
 
 // Simulate trading
-function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 0, profile = getBacktestProfile('MEDIUM')) {
+function simulateTrades(priceData, signals, scoreSeries, initialCapital, startTradingIndex = 0, profile = getBacktestProfile('MEDIUM')) {
   const trades = [];
   const equityCurve = [];
 
@@ -358,6 +355,15 @@ function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 
         actionMeta = { tradeId: closedTrade.tradeId, pnl: closedTrade.pnlDollars, reason: closedTrade.reason };
         exitedThisBar = true;
       }
+
+      if (!exitedThisBar && position.atrAtEntry && profile.trailingAtrMultiplier > 0) {
+        const peak = Math.max(safeNumber(position.peakPrice, position.entryPrice), currentPrice);
+        position.peakPrice = peak;
+        const trailingStop = peak - profile.trailingAtrMultiplier * position.atrAtEntry;
+        if (Number.isFinite(trailingStop)) {
+          position.stopLossPrice = Math.max(position.stopLossPrice, parseFloat(trailingStop.toFixed(4)));
+        }
+      }
     }
 
     // Check entry conditions
@@ -367,25 +373,48 @@ function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 
       const stopLossPrice = atr14 != null
         ? parseFloat((entryPrice - profile.atrStopMult * atr14).toFixed(4))
         : parseFloat((entryPrice * (1 - safeNumber(profile.stopLossPct, 0.03))).toFixed(4));
+      let dynamicTpMult = profile.atrTakeProfitMult;
+      if (atr14 && entryPrice > 0) {
+        const volRatio = atr14 / entryPrice;
+        if (volRatio > 0.035) dynamicTpMult *= 1.2;
+        else if (volRatio < 0.015) dynamicTpMult *= 0.85;
+      }
+      if (signal === 'STRONG_BUY') dynamicTpMult *= 1.1;
+
       const takeProfitPrice = atr14 != null
-        ? parseFloat((entryPrice + profile.atrTakeProfitMult * atr14).toFixed(4))
+        ? parseFloat((entryPrice + atr14 * dynamicTpMult).toFixed(4))
         : parseFloat((entryPrice * (1 + safeNumber(profile.takeProfitPct, 0.07))).toFixed(4));
+
+      const perShareRisk = Math.max(1e-9, entryPrice - stopLossPrice);
+      const riskAmount = Math.max(0, capital * safeNumber(profile.riskPerTradePct, 0.01));
+      const targetNotional = (riskAmount / perShareRisk) * entryPrice;
+      const maxNotional = capital * safeNumber(profile.maxCapitalAllocationPct, 0.5);
+      const allocatedCapital = Math.max(0, Math.min(capital, maxNotional, targetNotional));
+
+      if (allocatedCapital <= 0) {
+        continue;
+      }
+
       position = {
         tradeId: nextTradeId++,
         entryIndex: i,
         entryPrice,
         entryDate: current.date,
         entrySignal: signal,
+        entryScore: safeNumber(scoreSeries?.[i], 0),
         atrAtEntry: atr14 != null ? parseFloat(atr14.toFixed(4)) : null,
         stopLossPrice,
         takeProfitPrice,
+        allocatedCapital: parseFloat(allocatedCapital.toFixed(2)),
+        cashReserve: parseFloat((capital - allocatedCapital).toFixed(2)),
+        peakPrice: entryPrice,
       };
       action = 'BUY';
       actionMeta = { tradeId: position.tradeId, reason: signal };
     }
 
     const markedCapital = position
-      ? capital * (safeNumber(current.close) / safeNumber(position.entryPrice, 1))
+      ? position.cashReserve + position.allocatedCapital * (safeNumber(current.close) / safeNumber(position.entryPrice, 1))
       : capital;
 
     equityCurve.push({
@@ -414,7 +443,7 @@ function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 
   function closeTrade(pos, exitCandle, reason) {
     const exitPrice = exitCandle.close;
     const pnlPercent = (exitPrice - pos.entryPrice) / pos.entryPrice;
-    const pnlDollars = capital * pnlPercent;
+    const pnlDollars = safeNumber(pos.allocatedCapital, capital) * pnlPercent;
 
     const trade = {
       tradeId: pos.tradeId,
@@ -426,14 +455,16 @@ function simulateTrades(priceData, signals, initialCapital, startTradingIndex = 
       pnlDollars: parseFloat(pnlDollars.toFixed(2)),
       daysHeld: Math.max(1, Math.floor((exitCandle.date - pos.entryDate) / (1000 * 60 * 60 * 24))),
       entrySignal: pos.entrySignal,
+      entryScore: pos.entryScore,
       reason,
       atrAtEntry: pos.atrAtEntry ?? null,
       stopLossPrice: pos.stopLossPrice ?? null,
       takeProfitPrice: pos.takeProfitPrice ?? null,
+      capitalAllocated: pos.allocatedCapital,
     };
 
     trades.push(trade);
-    capital *= (1 + pnlPercent);
+    capital = safeNumber(pos.cashReserve, 0) + safeNumber(pos.allocatedCapital, 0) + pnlDollars;
     trade.balanceAfter = parseFloat(capital.toFixed(2));
     position = null;
     return trade;
@@ -472,6 +503,10 @@ function computeMetrics(trades, equityCurve, initialCapital, finalCapital, days)
 
   const avgTradeReturn = trades.length > 0
     ? trades.reduce((sum, trade) => sum + trade.pnlPercent, 0) / trades.length
+    : 0;
+  const expectancyPct = avgTradeReturn;
+  const expectancyDollars = trades.length > 0
+    ? trades.reduce((sum, trade) => sum + safeNumber(trade.pnlDollars, 0), 0) / trades.length
     : 0;
 
   const avgWinSize = winningTrades.length > 0
@@ -547,6 +582,54 @@ function computeMetrics(trades, equityCurve, initialCapital, finalCapital, days)
 
   const recoveryDays = deepestDrawdown?.recoveryDays ?? null;
 
+  const scoreBuckets = {
+    '4-4.9': [],
+    '5-5.9': [],
+    '6+': [],
+  };
+  trades.forEach((trade) => {
+    const score = safeNumber(trade.entryScore, 0);
+    if (score >= 6) scoreBuckets['6+'].push(trade);
+    else if (score >= 5) scoreBuckets['5-5.9'].push(trade);
+    else if (score >= 4) scoreBuckets['4-4.9'].push(trade);
+  });
+  const scoreBucketStats = Object.entries(scoreBuckets).map(([bucket, bucketTrades]) => {
+    const count = bucketTrades.length;
+    const wins = bucketTrades.filter((trade) => safeNumber(trade.pnlPercent, 0) > 0).length;
+    const avg = count ? bucketTrades.reduce((sum, trade) => sum + safeNumber(trade.pnlPercent, 0), 0) / count : 0;
+    return {
+      bucket,
+      trades: count,
+      winRate: count ? parseFloat(((wins / count) * 100).toFixed(1)) : 0,
+      avgReturn: parseFloat(avg.toFixed(2)),
+    };
+  });
+
+  const holdingBuckets = {
+    '1-5d': [],
+    '6-20d': [],
+    '21d+': [],
+  };
+  trades.forEach((trade) => {
+    const held = safeNumber(trade.daysHeld, 0);
+    if (held <= 5) holdingBuckets['1-5d'].push(trade);
+    else if (held <= 20) holdingBuckets['6-20d'].push(trade);
+    else holdingBuckets['21d+'].push(trade);
+  });
+  const holdingPeriodStats = Object.entries(holdingBuckets).map(([bucket, bucketTrades]) => {
+    const count = bucketTrades.length;
+    const avg = count ? bucketTrades.reduce((sum, trade) => sum + safeNumber(trade.pnlPercent, 0), 0) / count : 0;
+    const winRate = count
+      ? (bucketTrades.filter((trade) => safeNumber(trade.pnlPercent, 0) > 0).length / count) * 100
+      : 0;
+    return {
+      bucket,
+      trades: count,
+      winRate: parseFloat(winRate.toFixed(1)),
+      avgReturn: parseFloat(avg.toFixed(2)),
+    };
+  });
+
   return {
     totalTrades: trades.length,
     winRate: parseFloat(winRate.toFixed(1)),
@@ -555,12 +638,16 @@ function computeMetrics(trades, equityCurve, initialCapital, finalCapital, days)
     maxDrawdown: parseFloat(maxDrawdown.toFixed(1)),
     cagr: parseFloat(cagr.toFixed(1)),
     avgTradeReturn: parseFloat(avgTradeReturn.toFixed(2)),
+    expectancyPct: parseFloat(expectancyPct.toFixed(2)),
+    expectancyDollars: parseFloat(expectancyDollars.toFixed(2)),
     avgWinSize: parseFloat(avgWinSize.toFixed(2)),
     avgLossSize: parseFloat(avgLossSize.toFixed(2)),
     maxSingleTradeLoss: parseFloat(maxSingleTradeLoss.toFixed(2)),
     maxConsecutiveLosses,
     recoveryDays,
     drawdownPeriods,
+    scoreBucketStats,
+    holdingPeriodStats,
   };
 }
 
@@ -571,7 +658,7 @@ async function runBacktest(params, dependencies = {}) {
     strategyName = 'trade-recommendation',
     startDate,
     endDate,
-    initialCapital = 100000,
+    initialCapital = 10000,
     apiKey,
     timeHorizon = 'MEDIUM',
   } = params;
@@ -648,10 +735,16 @@ async function runBacktest(params, dependencies = {}) {
   }
   
   // Generate signals
+  const scoreSeries = strategyName === 'trade-recommendation'
+    ? simulationData.map((_, i) => {
+        if (i < getRequiredWarmupBars(strategyName)) return 0;
+        return scoreBacktestSnapshot(simulationData, i, profile.timeHorizon);
+      })
+    : simulationData.map(() => 0);
   const signals = simulationData.map((p, i) => generateSignal(simulationData, i, strategyName, profile.timeHorizon));
   
   // Simulate trades
-  const { trades, capital: finalCapital, equityCurve } = simulateTrades(simulationData, signals, initialCapital, tradingStartOffset, profile);
+  const { trades, capital: finalCapital, equityCurve } = simulateTrades(simulationData, signals, scoreSeries, initialCapital, tradingStartOffset, profile);
   
   // Compute metrics
   const days = filteredData.length;

@@ -2,11 +2,23 @@
 // Accessible at: /api/cron/sync-news
 
 const { main: syncNews } = require('../../scripts/sync-news-to-neon');
+const crypto = require('crypto');
 
 module.exports = async function handler(req, res) {
   // Verify cron secret to prevent unauthorized calls
-  const cronSecret = process.env.CRON_SECRET;
-  if (req.headers['authorization'] !== `Bearer ${cronSecret}`) {
+  const cronSecret = String(process.env.CRON_SECRET || '').trim();
+  if (!cronSecret) {
+    return res.status(500).json({ error: 'CRON_SECRET is not configured' });
+  }
+
+  const providedAuth = String(req.headers['authorization'] || '');
+  const expectedAuth = `Bearer ${cronSecret}`;
+  const providedBuf = Buffer.from(providedAuth, 'utf8');
+  const expectedBuf = Buffer.from(expectedAuth, 'utf8');
+  const isAuthorized = providedBuf.length === expectedBuf.length
+    && crypto.timingSafeEqual(providedBuf, expectedBuf);
+
+  if (!isAuthorized) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 

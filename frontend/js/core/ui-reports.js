@@ -1,6 +1,45 @@
 // Frontend UI report persistence (browser localStorage only).
 const REPORTS_STORAGE_KEY = 'quantbot.reports.v1';
 
+function safeText(value) {
+  if (typeof window.escapeHtml === 'function') {
+    return window.escapeHtml(value);
+  }
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeReportHtml(html) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(String(html || ''), 'text/html');
+
+  doc.querySelectorAll('script, iframe, object, embed, link, meta, base').forEach((node) => node.remove());
+
+  const nodes = doc.body.querySelectorAll('*');
+  nodes.forEach((el) => {
+    const attrs = Array.from(el.attributes || []);
+    attrs.forEach((attr) => {
+      const name = String(attr.name || '').toLowerCase();
+      const value = String(attr.value || '').trim();
+
+      if (name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+        return;
+      }
+
+      if ((name === 'href' || name === 'src') && /^javascript:/i.test(value)) {
+        el.removeAttribute(attr.name);
+      }
+    });
+  });
+
+  return doc.body.innerHTML;
+}
+
 function readLocalReports() {
   try {
     const raw = localStorage.getItem(REPORTS_STORAGE_KEY);
@@ -46,9 +85,9 @@ function renderReportsMenu(reports) {
   container.innerHTML = reports.map((report) => `
     <div class="report-menu-item">
       <div class="report-menu-meta">
-        <div class="report-menu-ticker">${report.ticker}</div>
-        <div class="report-menu-label" title="${report.label}">${report.label}</div>
-        <div class="report-menu-date">${formatReportTimestamp(report.created_at)}</div>
+        <div class="report-menu-ticker">${safeText(report.ticker)}</div>
+        <div class="report-menu-label" title="${safeText(report.label)}">${safeText(report.label)}</div>
+        <div class="report-menu-date">${safeText(formatReportTimestamp(report.created_at))}</div>
       </div>
       <div class="report-menu-actions">
         <button class="report-menu-action load" onclick="event.stopPropagation();restoreReport(${report.id})">Load</button>
@@ -82,7 +121,7 @@ async function saveCurrentReport() {
   }
 
   const panel = document.getElementById('analysis-panel');
-  const html = buildSavableReportHtml();
+  const html = sanitizeReportHtml(buildSavableReportHtml());
   const payloadBytes = new Blob([html]).size;
 
   if (payloadBytes > 9 * 1024 * 1024) {
@@ -137,7 +176,7 @@ async function restoreReport(id) {
     const welcome = document.getElementById('welcome-state');
     if (welcome) welcome.style.display = 'none';
 
-    panel.innerHTML = report.html;
+    panel.innerHTML = sanitizeReportHtml(report.html);
     closeReportsMenu();
     showToast(`📂 Loaded: ${report.label}`);
   } catch (err) {

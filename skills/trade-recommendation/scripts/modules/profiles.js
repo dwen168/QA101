@@ -3,6 +3,26 @@ function normalizeTimeHorizon(value = 'MEDIUM') {
   return ['SHORT', 'MEDIUM', 'LONG'].includes(normalized) ? normalized : 'MEDIUM';
 }
 
+function getActionThresholds(timeHorizon = 'MEDIUM') {
+  const normalized = normalizeTimeHorizon(timeHorizon);
+  const thresholds = {
+    SHORT: { strongBuy: 7, buy: 4, holdLow: -2, holdHigh: 2, sell: -4, strongSell: -7 },
+    MEDIUM: { strongBuy: 7, buy: 4, holdLow: -2, holdHigh: 2, sell: -4, strongSell: -7 },
+    LONG: { strongBuy: 8, buy: 5, holdLow: -2, holdHigh: 2, sell: -5, strongSell: -8 },
+  };
+  return thresholds[normalized];
+}
+
+function mapActionFromScore(score, timeHorizon = 'MEDIUM') {
+  const s = Number(score || 0);
+  const t = getActionThresholds(timeHorizon);
+  if (s >= t.strongBuy) return { action: 'STRONG BUY', actionColor: '#10b981' };
+  if (s >= t.buy) return { action: 'BUY', actionColor: '#6ee7b7' };
+  if (s <= t.strongSell) return { action: 'STRONG SELL', actionColor: '#dc2626' };
+  if (s <= t.sell) return { action: 'SELL', actionColor: '#f87171' };
+  return { action: 'HOLD', actionColor: '#f59e0b' };
+}
+
 function getRecommendationProfile(timeHorizon = 'MEDIUM') {
   const normalized = normalizeTimeHorizon(timeHorizon);
   const profiles = {
@@ -103,6 +123,8 @@ function buildObjectiveLensSummary(signals, profile) {
 module.exports = {
   normalizeTimeHorizon,
   getRecommendationProfile,
+  getActionThresholds,
+  mapActionFromScore,
   adjustSignalPoints,
   collectLensSignalNames,
   buildObjectiveLensSummary

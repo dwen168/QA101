@@ -18,11 +18,23 @@ function addMessage(role, content, skillBadge = null) {
   const container = document.getElementById('chat-messages');
   const msgDiv = document.createElement('div');
   msgDiv.className = `msg ${role} fade-in`;
-  let html = '';
-  if (skillBadge) html += `<div class="skill-badge ${skillBadge.cls}">${skillBadge.label}</div>`;
-  html += `<div class="msg-bubble">${content}</div>`;
-  html += `<span class="msg-time">${role === 'user' ? 'You' : 'QuantBot'} · ${formatTime()}</span>`;
-  msgDiv.innerHTML = html;
+  if (skillBadge) {
+    const badge = document.createElement('div');
+    badge.className = `skill-badge ${String(skillBadge.cls || '')}`;
+    badge.textContent = String(skillBadge.label || '');
+    msgDiv.appendChild(badge);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.textContent = String(content || '');
+  msgDiv.appendChild(bubble);
+
+  const time = document.createElement('span');
+  time.className = 'msg-time';
+  time.textContent = `${role === 'user' ? 'You' : 'QuantBot'} · ${formatTime()}`;
+  msgDiv.appendChild(time);
+
   container.appendChild(msgDiv);
   container.scrollTop = container.scrollHeight;
 }
@@ -32,7 +44,22 @@ function addLoadingMsg(text) {
   const div = document.createElement('div');
   div.id = 'loading-msg';
   div.className = 'msg bot fade-in';
-  div.innerHTML = `<div class="msg-bubble" style="display:flex;align-items:center;gap:8px;"><div class="spin"></div>${text}</div>`;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.style.display = 'flex';
+  bubble.style.alignItems = 'center';
+  bubble.style.gap = '8px';
+
+  const spinner = document.createElement('div');
+  spinner.className = 'spin';
+  bubble.appendChild(spinner);
+
+  const label = document.createElement('span');
+  label.textContent = String(text || '');
+  bubble.appendChild(label);
+
+  div.appendChild(bubble);
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;

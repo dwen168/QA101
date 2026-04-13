@@ -74,6 +74,40 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function sanitizeHtmlFragment(html) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(String(html || ''), 'text/html');
+
+  doc.querySelectorAll('script, iframe, object, embed, link, meta, base').forEach((node) => node.remove());
+
+  const nodes = doc.body.querySelectorAll('*');
+  nodes.forEach((el) => {
+    const attrs = Array.from(el.attributes || []);
+    attrs.forEach((attr) => {
+      const name = String(attr.name || '').toLowerCase();
+      const value = String(attr.value || '').trim();
+
+      if (name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+        return;
+      }
+
+      if ((name === 'href' || name === 'src') && /^javascript:/i.test(value)) {
+        el.removeAttribute(attr.name);
+      }
+    });
+  });
+
+  return doc.body.innerHTML;
+}
+
+function sanitizeElementHtml(element) {
+  if (!element) return;
+  element.innerHTML = sanitizeHtmlFragment(element.innerHTML);
+}
+
 window.toggleTheme = toggleTheme;
 window.setMobileTab = setMobileTab;
 window.escapeHtml = escapeHtml;
+window.sanitizeHtmlFragment = sanitizeHtmlFragment;
+window.sanitizeElementHtml = sanitizeElementHtml;

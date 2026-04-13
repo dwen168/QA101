@@ -53,19 +53,19 @@ async function processMessage(text) {
     removeLoadingMsg();
 
     if (data.action === 'ANALYZE_STOCK' && data.ticker) {
-      addMessage('bot', data.message || `Running analysis on <strong>${data.ticker}</strong>...`);
+      addMessage('bot', data.message || `Running analysis on ${data.ticker}...`);
       chatHistory.push({ role: 'assistant', content: data.message });
       if (document.body.classList.contains('is-mobile')) setMobileTab('analysis');
       await runSkillPipeline(data.ticker, data.timeHorizon || 'MEDIUM');
     } else if (data.action === 'RUN_BACKTEST' && data.ticker) {
-      addMessage('bot', data.message || `Running backtest on <strong>${data.ticker}</strong>...`);
+      addMessage('bot', data.message || `Running backtest on ${data.ticker}...`);
       chatHistory.push({ role: 'assistant', content: data.message || 'Running backtest...' });
       if (document.body.classList.contains('is-mobile')) setMobileTab('analysis');
       await runBacktestPipeline(data.ticker, data.startDate, data.endDate, data.strategyName || 'trade-recommendation', data.timeHorizon || 'MEDIUM');
     } else if (data.action === 'OPTIMIZE_PORTFOLIO') {
       const tickers = Array.isArray(data.tickers) ? data.tickers : [];
       if (tickers.length >= 2) {
-        addMessage('bot', data.message || `Running portfolio optimization on <strong>${tickers.join(', ')}</strong>...`);
+        addMessage('bot', data.message || `Running portfolio optimization on ${tickers.join(', ')}...`);
         chatHistory.push({ role: 'assistant', content: data.message || 'Running portfolio optimization...' });
         if (document.body.classList.contains('is-mobile')) setMobileTab('analysis');
         await runPortfolioPipeline(tickers, data.timeHorizon || 'MEDIUM');
@@ -115,7 +115,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     fallbackReason = d1.fallbackReason;
     setPillState(1, 'done');
     removeLoadingMsg();
-    addMessage('bot', `✓ Market intelligence collected for <strong>${ticker}</strong> <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's1', label: '① market-intelligence' });
+    addMessage('bot', `✓ Market intelligence collected for ${ticker} (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's1', label: '① market-intelligence' });
     renderMarketIntelligence(marketData, llmAnalysis, panel, dataSource, usedFallback, fallbackReason);
   } catch (err) {
     if (isAbortError(err)) return;
@@ -141,7 +141,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     edaInsights = d2.edaInsights;
     setPillState(2, 'done');
     removeLoadingMsg();
-    addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's2', label: '② eda-visual-analysis' });
+    addMessage('bot', `✓ Visual EDA complete — ${edaInsights.insights?.length || 4} key insights found (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's2', label: '② eda-visual-analysis' });
     renderEDA(charts, edaInsights, marketData, panel);
   } catch (err) {
     if (isAbortError(err)) return;
@@ -176,7 +176,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     } catch (e) {
       // ignore backtest-view failures
     }
-    addMessage('bot', `✓ <strong style="color:${rec.actionColor}">${rec.action}</strong> — ${rec.confidence}% confidence <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's3', label: '③ trade-recommendation' });
+    addMessage('bot', `✓ ${rec.action} — ${rec.confidence}% confidence (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's3', label: '③ trade-recommendation' });
     renderRecommendation(rec, panel);
     // Save a structured snapshot so the UI can be rehydrated (preserves interactivity)
     try {
@@ -191,7 +191,7 @@ async function runSkillPipeline(ticker, timeHorizon = 'MEDIUM') {
     } catch (e) {
       window.__lastAnalysisSnapshot = null;
     }
-    addMessage('bot', `⏱ Total pipeline time: <strong>${formatDurationMs(performance.now() - pipelineStartedAt)}</strong>`);
+    addMessage('bot', `⏱ Total pipeline time: ${formatDurationMs(performance.now() - pipelineStartedAt)}`);
   } catch (err) {
     if (isAbortError(err)) return;
     setPillState(3, '');
@@ -225,10 +225,10 @@ async function runPortfolioPipeline(tickers, timeHorizon = 'MEDIUM') {
 
     addMessage(
       'bot',
-      `✓ Portfolio optimization complete for <strong>${tickers.join(', ')}</strong> <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`,
+      `✓ Portfolio optimization complete for ${tickers.join(', ')} (${formatDurationMs(performance.now() - skillStartedAt)})`,
       { cls: 's2', label: 'portfolio-optimization' }
     );
-    addMessage('bot', `⏱ Total pipeline time: <strong>${formatDurationMs(performance.now() - pipelineStartedAt)}</strong>`);
+    addMessage('bot', `⏱ Total pipeline time: ${formatDurationMs(performance.now() - pipelineStartedAt)}`);
     renderPortfolioOptimization(d, panel);
   } catch (err) {
     if (isAbortError(err)) return;
@@ -257,7 +257,7 @@ async function runBacktestPipeline(ticker, startDate, endDate, strategyName = 't
     const r = await apiFetch(`${API_BASE}/skills/backtesting`, {
       method: 'POST',
       headers: getLlmHeaders(),
-      body: JSON.stringify({ ticker, startDate, endDate, strategyName, timeHorizon, initialCapital: 1000 }),
+      body: JSON.stringify({ ticker, startDate, endDate, strategyName, timeHorizon, initialCapital: 10000 }),
     });
     const d = await r.json();
     removeLoadingMsg();
@@ -266,15 +266,15 @@ async function runBacktestPipeline(ticker, startDate, endDate, strategyName = 't
       setPillState(4, '');
       const availableRange = d?.availableRange;
       const rangeHint = availableRange?.startDate && availableRange?.endDate
-        ? `<br><span style="color:var(--text3);font-family:var(--mono)">Available range: ${availableRange.startDate} to ${availableRange.endDate}</span>`
+        ? `\nAvailable range: ${availableRange.startDate} to ${availableRange.endDate}`
         : '';
       addMessage('bot', `${d.error || 'Backtesting failed.'}${rangeHint}`);
       return;
     }
 
     setPillState(4, 'done');
-    addMessage('bot', `✓ Backtest complete for <strong>${ticker}</strong> <span style="color:var(--text3);font-family:var(--mono)">(${formatDurationMs(performance.now() - skillStartedAt)})</span>`, { cls: 's2', label: '④ backtesting' });
-    addMessage('bot', `⏱ Total pipeline time: <strong>${formatDurationMs(performance.now() - pipelineStartedAt)}</strong>`);
+    addMessage('bot', `✓ Backtest complete for ${ticker} (${formatDurationMs(performance.now() - skillStartedAt)})`, { cls: 's2', label: '④ backtesting' });
+    addMessage('bot', `⏱ Total pipeline time: ${formatDurationMs(performance.now() - pipelineStartedAt)}`);
     renderBacktestReport(d.backtestReport, panel);
   } catch (err) {
     if (isAbortError(err)) return;
